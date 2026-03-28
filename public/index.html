@@ -1,0 +1,4466 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>StoreTycoon: IT Empire</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+    <script src="https://unpkg.com/tonweb@0.0.66/dist/tonweb.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0f172a;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            /* Жестко фиксируем размеры для Desktop Telegram */
+            width: 100vw;
+            height: 100vh; 
+            max-width: 100%;
+            max-height: 100%;
+            overflow: hidden;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw !important;
+            height: 100vh !important;
+            touch-action: none;
+            z-index: 1; /* Опускаем Canvas на нижний слой */
+            background-color: #0f172a;
+        }
+        
+        .ui-panel {
+            .ui-panel {
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid #3b82f6;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+            z-index: 50; /* Поднимаем UI над Canvas */
+            pointer-events: auto; /* Включаем клики */
+        }
+
+        /* Чтобы прозрачный фон не блокировал клики по игре */
+        .pointer-events-none { pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+    
+    /* MOBILE FIX: Centering */
+    position: fixed;
+    left: 50% !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    overflow-y: auto;
+    backdrop-filter: blur(10px);
+    color: white;
+}
+
+        .bottom-nav {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            padding: 10px;
+            width: 100%;
+            position: fixed;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid #3b82f6;
+            z-index: 50;
+        }
+        
+        .floating-text {
+            position: absolute;
+            font-weight: 900;
+            font-size: 1.5rem;
+            pointer-events: none;
+            animation: floatUp 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+            text-shadow: 2px 2px 0 #000;
+            -webkit-text-stroke: 1px rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        @keyframes floatUp {
+            0% { opacity: 0; transform: translateY(10px) scale(0.8); }
+            20% { opacity: 1; transform: translateY(0) scale(1.1); }
+            100% { opacity: 0; transform: translateY(-60px) scale(1); }
+        }
+
+        .btn-pressable {
+            transition: all 0.1s;
+            border-bottom-width: 4px;
+            touch-action: manipulation;
+        }
+        
+        .btn-pressable:active {
+            transform: translateY(2px);
+            border-bottom-width: 0px;
+            margin-top: 2px;
+        }
+
+        /* Адаптация для мобильных */
+@media (max-width: 768px) {
+    .mobile-hidden {
+        display: none !important;
+    }
+    
+    .mobile-text-sm {
+        font-size: 0.875rem !important;
+    }
+    
+    .mobile-p-2 {
+        padding: 0.5rem !important;
+    }
+    
+    .mobile-py-3 {
+        padding-top: 0.75rem !important;
+        padding-bottom: 0.75rem !important;
+    }
+    
+    /* Увеличиваем кнопки для мобильных */
+    button {
+        min-height: 44px !important;
+        min-width: 44px !important;
+    }
+    
+    /* Панели на весь экран */
+    .ui-panel {
+        width: 95% !important;
+        max-height: 85vh !important;
+    }
+    
+    /* Кнопка работы больше */
+    #work-btn {
+        font-size: 1.2rem !important;
+        padding: 16px !important;
+    }
+    
+    /* Мобильное меню улучшено */
+    .mobile-menu {
+        padding: 10px;
+    }
+    
+    .menu-content {
+        padding: 16px;
+        margin-bottom: 10px;
+    }
+}
+
+        @media (max-width: 480px) {
+            /* Еще больше увеличиваем для маленьких экранов */
+            #work-btn {
+                font-size: 1.1rem !important;
+                padding: 14px !important;
+            }
+            
+            .ui-panel {
+                width: 98% !important;
+                left: 1% !important;
+                right: 1% !important;
+            }
+        }
+
+        /* Quest notifications */
+        .quest-notification {
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            border: 1px solid #3b82f6;
+            border-left: 4px solid #3b82f6;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            animation: slideIn 0.3s ease-out;
+            backdrop-filter: blur(4px);
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* Tech debt bar */
+        .tech-debt-bar {
+            position: fixed;
+            bottom: 120px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 300px;
+            background: rgba(30, 41, 59, 0.9);
+            border-radius: 10px;
+            height: 24px;
+            overflow: hidden;
+            border: 1px solid #475569;
+            z-index: 40;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Save notification */
+        .save-notification {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(21, 128, 61, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            z-index: 1000;
+            animation: fadeInOut 2s ease-in-out;
+            backdrop-filter: blur(10px);
+            white-space: nowrap;
+        }
+
+        @keyframes fadeInOut {
+            0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+            20% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            80% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+        }
+
+        /* Mobile menu */
+        .mobile-menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 2000;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .menu-content {
+            background: rgba(30, 41, 59, 0.95);
+            border-radius: 20px;
+            padding: 24px;
+            margin-top: auto;
+            margin-bottom: 20px;
+            border: 1px solid #3b82f6;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(30, 41, 59, 0.5);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #3b82f6;
+            border-radius: 3px;
+        }
+
+        /* Prevent text selection */
+        .no-select {
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body class="no-select">
+    <!-- Mobile Menu Button -->
+   
+
+    <div class="fixed top-4 left-4 z-40 flex flex-col gap-1">
+    <div class="bg-slate-900/80 backdrop-blur-md rounded-xl py-1.5 px-3 border border-slate-700 shadow-lg flex flex-col">
+        <span class="text-amber-400 font-bold text-lg leading-tight" id="ui-money">$0</span>
+        <span class="text-green-400 text-xs font-bold leading-tight" id="ui-income">+0/сек</span>
+    </div>
+</div>
+
+<div class="fixed top-4 right-4 z-40">
+    <div onclick="toggleTstShop(true)" 
+         class="bg-slate-900/80 backdrop-blur-md rounded-xl py-1.5 px-3 border border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.3)] flex items-center gap-2 cursor-pointer hover:opacity-80 transition-all">
+        <span class="text-cyan-400 font-bold text-lg" id="ui-tst">0</span>
+        <span class="text-xl">💎</span>
+    </div>
+</div>
+
+<div class="fixed top-4 left-1/2 -translate-x-1/2 z-40 w-full max-w-[240px] flex flex-col gap-1.5 pointer-events-none" id="hud-quests">
+    </div>
+
+<button id="mini-event-btn" class="hidden fixed top-20 right-4 z-40 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-full p-2 shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-bounce flex items-center justify-center transition-transform active:scale-90">
+    <span class="text-2xl" id="mini-event-icon">⚠️</span>
+</button>
+
+<div class="fixed bottom-6 left-4 z-40 flex flex-col gap-3">
+    <button onclick="returnToStore()" class="w-12 h-12 bg-slate-800/80 backdrop-blur rounded-full text-2xl shadow-lg border border-slate-600 flex items-center justify-center transition-transform active:scale-90">
+    🚪
+</button>
+    <button onclick="resetProgress()" class="w-12 h-12 bg-slate-900/50 backdrop-blur rounded-full text-lg shadow-lg border border-red-900/50 flex items-center justify-center opacity-40 hover:opacity-100 transition-all active:scale-90">
+        🔄
+    </button>
+</div>
+
+<!-- Вертикальная панель кнопок справа внизу -->
+<div class="fixed bottom-6 right-4 z-40 flex flex-col gap-3">
+    <!-- Кнопка магазина оборудования -->
+    <button onclick="openShop('equipment')" 
+            class="w-14 h-14 bg-blue-600 rounded-full text-2xl shadow-[0_4px_20px_rgba(37,99,235,0.4)] border-2 border-blue-400 flex items-center justify-center transition-transform active:scale-90">
+        🔨
+    </button>
+    
+    <!-- Кнопка найма персонала -->
+    <button onclick="openShop('staff')" 
+            class="w-14 h-14 bg-green-600 rounded-full text-2xl shadow-[0_4px_20px_rgba(22,163,74,0.4)] border-2 border-green-400 flex items-center justify-center transition-transform active:scale-90">
+        👤
+    </button>
+    
+    <!-- Кнопка скинов -->
+    <button onclick="toggleSkinsShop()" 
+        class="w-14 h-14 bg-purple-600 rounded-full text-2xl shadow-[0_4px_20px_rgba(147,51,234,0.4)] border-2 border-purple-400 flex items-center justify-center transition-transform active:scale-90 relative">
+    🃏
+    <span class="absolute -top-1 -right-1 w-4 h-4 bg-yellow-400 rounded-full border border-slate-900 animate-pulse"></span>
+</button>
+</div>
+
+<div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center gap-3 w-full max-w-[280px] sm:max-w-[320px] px-4 pointer-events-none">
+    
+    <div id="tech-debt-bar" class="w-full bg-slate-900/90 backdrop-blur rounded-xl p-2 border border-slate-700 shadow-lg pointer-events-auto transition-all">
+        <div class="flex justify-between items-center text-[10px] sm:text-xs font-bold mb-1">
+            <span class="text-slate-300">🔥 Техдолг</span>
+            <span id="debt-value" class="text-green-400">0%</span>
+        </div>
+        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700/50">
+            <div id="tech-debt-fill" class="bg-gradient-to-r from-green-500 to-green-600 h-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <button id="work-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-2xl shadow-[0_4px_20px_rgba(37,99,235,0.4)] border-b-4 border-blue-800 transition-all active:translate-y-1 active:border-b-0 px-6 py-4 sm:py-5 text-lg sm:text-xl pointer-events-auto flex items-center justify-center gap-2">
+        <span class="text-2xl">👨‍💻</span> Писать код
+    </button>
+</div>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="notification-center" class="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+    <div id="event-panel" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+        <div class="bg-slate-900/95 border border-amber-500/50 rounded-2xl shadow-2xl w-full max-w-md p-6 flex flex-col justify-center text-center overflow-hidden">
+            <div class="text-6xl mb-4 drop-shadow-lg" id="event-icon">⚠️</div>
+            <h3 class="text-white font-bold text-2xl mb-3" id="event-title">Событие</h3>
+            <p class="text-slate-300 text-lg mb-8" id="event-desc">Описание события</p>
+            <div id="event-choices" class="space-y-4 w-full">
+                </div>
+        </div>
+    </div>
+
+    <div id="shop-panel" class="hidden fixed inset-0 z-50 flex flex-col sm:items-center sm:justify-center sm:p-4 bg-black/50 backdrop-blur-sm">
+        <div class="bg-slate-900/95 flex-1 sm:flex-none w-full sm:h-auto sm:max-w-md sm:max-h-[80vh] sm:border border-blue-500/50 sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-4 bg-slate-900 border-b border-slate-700 flex justify-between items-center">
+                <h3 class="text-white font-bold text-lg" id="shop-title">Магазин</h3>
+                <button onclick="togglePanel('shop-panel')" class="text-slate-400 hover:text-white transition-colors text-2xl">✕</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-3 space-y-3" id="shop-items"></div>
+        </div>
+    </div>
+
+    <div id="skinsShopPanel" class="hidden fixed inset-0 z-40 bg-slate-900/95 flex flex-col backdrop-blur-md pb-[env(safe-area-inset-bottom)] transition-all duration-300 transform scale-95 opacity-0">
+        <div class="flex justify-between items-center p-4 border-b border-slate-700 pt-[calc(env(safe-area-inset-top)+1rem)]">
+            <h2 class="text-2xl font-bold text-white tracking-wide drop-shadow-md">МАГАЗИН СКИНОВ</h2>
+            <button onclick="toggleSkinsShop()" class="text-slate-400 hover:text-white transition-colors">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        
+        <div id="skinsGrid" class="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-3 gap-4 place-content-start">
+            </div>
+    </div>
+
+    <div id="skinModal" class="hidden fixed inset-0 z-50 bg-black/95 flex flex-col justify-center items-center p-6 backdrop-blur-xl transition-opacity pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <button onclick="closeSkinModal()" class="absolute top-[calc(env(safe-area-inset-top)+1.5rem)] right-6 text-white hover:text-red-400 transition-colors">
+            <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+        
+        <div id="modalRarityText" class="text-xl font-bold tracking-widest uppercase mb-2"></div>
+        <h2 id="modalSkinName" class="text-5xl font-extrabold text-white mb-8 text-center drop-shadow-lg"></h2>
+        
+        <div id="modalImageContainer" class="relative w-56 h-56 rounded-3xl flex justify-center items-center mb-8 border-4 shadow-2xl bg-slate-800">
+            <img id="modalSkinImg" src="" alt="Skin" class="w-40 h-40 object-contain" style="image-rendering: pixelated;">
+        </div>
+        
+        <p id="modalSkinDesc" class="text-slate-300 text-center mb-8 px-4 text-xl leading-relaxed max-w-sm"></p>
+        
+        <button id="buySkinBtn" class="w-full max-w-xs bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl text-2xl shadow-[0_0_20px_rgba(37,99,235,0.6)] transition-all active:scale-95">
+            💎 <span id="modalSkinPrice"></span>
+        </button>
+    </div>
+
+    <div id="tst-shop-panel" class="fixed inset-0 z-50 flex items-center justify-center hidden bg-slate-950/80 backdrop-blur-sm transition-opacity">
+    
+    <div class="bg-slate-900 w-full max-w-sm sm:max-w-md mx-4 rounded-3xl border border-slate-700 shadow-[0_0_40px_rgba(59,130,246,0.15)] overflow-hidden flex flex-col max-h-[90vh]">
+        
+        <div class="p-4 bg-slate-900 border-b border-slate-800 flex items-center gap-3 relative overflow-hidden">
+            <div class="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl pointer-events-none"></div>
+            
+            <button onclick="toggleTstShop(false)" class="w-8 h-8 flex items-center justify-center bg-slate-800 hover:bg-slate-700 rounded-full text-slate-300 transition-colors active:scale-90 text-xl font-bold z-10">
+                ‹
+            </button>
+            <h3 class="text-white font-bold text-lg flex-1 text-center pr-8 z-10 flex items-center justify-center gap-2">
+                Банк <span class="text-blue-400">TST</span> 💎
+            </h3>
+        </div>
+
+        <div class="p-4 overflow-y-auto flex flex-col gap-4">
+            
+            <div class="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 flex items-center justify-between hover:border-blue-500/50 transition-colors">
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl bg-slate-700 flex items-center justify-center text-2xl shadow-inner border border-slate-600">
+                        💎
+                    </div>
+                    <div>
+                        <div class="text-white font-bold text-lg">50 TST</div>
+                        <div class="text-slate-400 text-xs">Стартовый пак</div>
+                    </div>
+                </div>
+                <button onclick="initiateCryptoPayment('pack_50')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg border-b-2 border-blue-800 active:border-b-0 active:translate-y-[2px] transition-all flex items-center gap-1">
+                    0.5 <span class="text-blue-200 text-sm">TON</span>
+                </button>
+            </div>
+
+            <div class="relative bg-gradient-to-br from-indigo-900/80 to-purple-900/80 border border-purple-500/50 rounded-2xl p-4 flex items-center justify-between shadow-[0_0_20px_rgba(168,85,247,0.15)]">
+                <div class="absolute -top-3 left-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider shadow-md">
+                    🔥 Хит продаж
+                </div>
+                
+                <div class="flex items-center gap-3">
+                    <div class="w-12 h-12 rounded-xl bg-purple-800/50 flex items-center justify-center text-2xl shadow-inner border border-purple-400/30">
+                        💎<span class="text-sm absolute mt-6 ml-6">✨</span>
+                    </div>
+                    <div>
+                        <div class="text-white font-bold text-lg">250 TST</div>
+                        <div class="text-purple-300 text-xs">+25 бонусных!</div>
+                    </div>
+                </div>
+                <button onclick="initiateCryptoPayment('pack_250')" class="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold py-2 px-4 rounded-xl shadow-lg border-b-2 border-purple-800 active:border-b-0 active:translate-y-[2px] transition-all flex items-center gap-1">
+                    2.0 <span class="text-blue-200 text-sm">TON</span>
+                </button>
+            </div>
+
+            <div class="relative bg-gradient-to-br from-slate-800 to-slate-900 border border-yellow-500/30 rounded-2xl p-4 flex items-center justify-between">
+                 <div class="absolute -top-3 left-4 bg-gradient-to-r from-yellow-500 to-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider shadow-md">
+                    👑 Выбор инвестора
+                </div>
+                <div class="flex items-center gap-3 mt-1">
+                    <div class="w-12 h-12 rounded-xl bg-slate-800 flex items-center justify-center text-3xl shadow-inner border border-yellow-500/50">
+                        💼
+                    </div>
+                    <div>
+                        <div class="text-yellow-400 font-bold text-lg">1000 TST</div>
+                        <div class="text-slate-400 text-xs">+150 бонусных!</div>
+                    </div>
+                </div>
+                <button onclick="initiateCryptoPayment('pack_1000')" class="bg-slate-700 hover:bg-slate-600 text-yellow-400 font-bold py-2 px-4 rounded-xl shadow-lg border-b-2 border-slate-900 active:border-b-0 active:translate-y-[2px] transition-all flex items-center gap-1 border border-yellow-500/20">
+                    5.0 <span class="text-slate-400 text-sm">TON</span>
+                </button>
+            </div>
+
+        </div>
+        
+        <div class="p-3 bg-slate-950 text-center text-slate-500 text-xs border-t border-slate-800">
+            Транзакции защищены сетью TON Blockchain
+        </div>
+    </div>
+</div>
+
+    <script>
+        
+    // 1. АГРЕССИВНАЯ ИНИЦИАЛИЗАЦИЯ TELEGRAM WEB APP ДЛЯ ПК
+    const tg = window.Telegram.WebApp;
+    
+    // Вызываем сразу, не дожидаясь загрузки картинок
+    try {
+        tg.ready();
+        tg.expand();
+        // Вторая попытка для ПК, иногда первая не срабатывает из-за задержки рендера
+        setTimeout(() => tg.expand(), 100);
+
+        if (tg.requestFullscreen) {
+            tg.requestFullscreen();
+        }
+        if (tg.disableVerticalSwipes) {
+            tg.disableVerticalSwipes();
+        }
+        // Запрещаем ПК-клиенту сворачивать окно
+        if (tg.isExpanded === false) {
+             tg.expand();
+        }
+    } catch (e) {
+        console.warn("Fullscreen API пока недоступен:", e);
+    }
+
+        // ==================== TELEGRAM WEB APP ИНТЕГРАЦИЯ ====================
+        const TelegramWebApp = {
+            isActive: false,
+            user: null,
+            userId: null,
+            supportsCloudStorage: false,
+
+            
+            init() {
+                if (window.Telegram && Telegram.WebApp) {
+                    console.log('Running in Telegram Web App');
+                    this.isActive = true;
+                    Telegram.WebApp.expand();
+                    this.user = Telegram.WebApp.initDataUnsafe?.user;
+                    this.userId = this.user?.id || Telegram.WebApp.initDataUnsafe?.query_id;
+
+                    // Проверяем поддержку Cloud Storage
+                    this.supportsCloudStorage = !!Telegram.WebApp.CloudStorage;
+                    console.log('Cloud Storage supported:', this.supportsCloudStorage);
+                    
+                    Telegram.WebApp.setHeaderColor('#0f172a');
+                    Telegram.WebApp.setBackgroundColor('#0f172a');
+                    Telegram.WebApp.enableClosingConfirmation();
+                    
+                    Telegram.WebApp.BackButton.show();
+                    Telegram.WebApp.BackButton.onClick(() => {
+                        Telegram.WebApp.close();
+                    });
+                    
+                    if (this.userId) {
+                        window.TELEGRAM_USER_ID = this.userId;
+                    }
+                    
+                    this.adaptUIForTelegram();
+                    
+                    setTimeout(() => {
+                        // showNotification('👋 Добро пожаловать в Telegram!', 'info');
+                    }, 1000);
+                    
+                    return true;
+                }
+                return false;
+            },
+            
+            adaptUIForTelegram() {
+                // Показываем только кнопку меню в Telegram
+                const mobileElements = ['mobile-menu-btn'];
+                mobileElements.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.classList.remove('mobile-hidden');
+                });
+                
+                const workBtn = document.getElementById('work-btn');
+                if (workBtn) {
+                    workBtn.style.fontSize = '1.3rem';
+                    workBtn.style.padding = '20px';
+                }
+            },
+            
+            sendData(data) {
+                if (this.isActive && Telegram.WebApp) {
+                    Telegram.WebApp.sendData(JSON.stringify(data));
+                    return true;
+                }
+                return false;
+            },
+            
+            close() {
+                if (this.isActive && Telegram.WebApp) {
+                    Telegram.WebApp.close();
+                }
+            }
+        };
+
+        // ==================== TELEGRAM CLOUD STORAGE СИСТЕМА ====================
+const TelegramSaveSystem = {
+    SAVE_KEY: 'storetycoon_save_v2',
+    
+    // Сохраняем игру
+    async save() {
+        try {
+            if (!TelegramWebApp.isActive || !TelegramWebApp.supportsCloudStorage) {
+                console.log('Telegram Cloud Storage не доступен, используем локальное сохранение');
+                return SaveSystem._localSave();
+            }
+            
+            // Подготовка данных для сохранения
+            const saveData = {
+                version: '2.0',
+                timestamp: Date.now(),
+                gameState: {
+                    tsp: GameState.tsp,
+                    clickPower: GameState.clickPower,
+                    autoClicker: GameState.autoClicker,
+                    gridSize: GameState.gridSize,
+                    xp: GameState.xp,
+                    reputation: GameState.reputation,
+                    level: GameState.level,
+                    techDebt: GameState.techDebt,
+                    bugs: GameState.bugs,
+                    isServerDown: GameState.isServerDown,
+                    serverCrashTime: GameState.serverCrashTime
+                },
+                objects: GameState.objects,
+                npcs: GameState.npcs.map(npc => ({
+                    id: npc.id,
+                    name: npc.name,
+                    x: npc.x,
+                    y: npc.y,
+                    state: npc.state,
+                    targetX: npc.targetX,
+                    targetY: npc.targetY,
+                    fatigue: npc.fatigue,
+                    frame: npc.frame,
+                    speed: npc.speed,
+                    currentWorkstation: npc.currentWorkstation ? {
+                        x: npc.currentWorkstation.x,
+                        y: npc.currentWorkstation.y,
+                        id: npc.currentWorkstation.id
+                    } : null
+                })),
+                unlockedItems: UNLOCKED_ITEMS,
+                quests: {
+                    activeQuests: QuestSystem.activeQuests,
+                    completedQuests: QuestSystem.completedQuests,
+                    failedQuests: QuestSystem.failedQuests,
+                    stats: QuestSystem.stats
+                },
+                camera: {
+                    x: camera.x,
+                    y: camera.y,
+                    zoom: camera.zoom
+                }
+            };
+            
+            console.log('Сохраняем в Telegram Cloud Storage...');
+            
+            // Сохраняем в Cloud Storage Telegram
+            await Telegram.WebApp.CloudStorage.setItem(this.SAVE_KEY, JSON.stringify(saveData));
+            
+            // Также сохраняем локально для резервной копии
+            SaveSystem._localSave();
+            
+            this.showSaveNotification('☁️ Игра сохранена в Telegram Cloud!');
+            console.log('Успешно сохранено в Telegram Cloud Storage');
+            
+            return true;
+            
+        } catch (error) {
+            console.error('Ошибка сохранения в Telegram Cloud Storage:', error);
+            
+            // Fallback на локальное сохранение
+            const localSaved = SaveSystem._localSave();
+            if (localSaved) {
+                showNotification('Сохранено локально (ошибка облака)', 'warning');
+            }
+            return localSaved;
+        }
+    },
+    
+    // Загружаем игру
+    async load() {
+        try {
+            if (!TelegramWebApp.isActive || !TelegramWebApp.supportsCloudStorage) {
+                console.log('Telegram Cloud Storage не доступен, используем локальную загрузку');
+                return SaveSystem.load();
+            }
+            
+            console.log('Загружаем из Telegram Cloud Storage...');
+            
+            // Получаем данные из Cloud Storage
+            const saved = await Telegram.WebApp.CloudStorage.getItem(this.SAVE_KEY);
+            
+            if (!saved) {
+                console.log('Нет сохранений в Telegram Cloud Storage');
+                showNotification('Нет сохранений в облаке. Загружаю локальные...', 'info');
+                return SaveSystem.load();
+            }
+            
+            const saveData = JSON.parse(saved);
+            console.log('Данные загружены из Telegram Cloud:', saveData);
+            
+            // Проверяем версию
+            if (saveData.version !== '2.0') {
+                console.warn('Версия сохранения отличается');
+                showNotification('Версия сохранения отличается. Использую локальное.', 'warning');
+                return SaveSystem.load();
+            }
+            
+            // Восстанавливаем состояние игры
+            this.restoreGameState(saveData);
+            
+            this.showSaveNotification('☁️ Игра загружена из Telegram Cloud!');
+            console.log('Успешно загружено из Telegram Cloud Storage');
+            
+            return true;
+            
+        } catch (error) {
+            console.error('Ошибка загрузки из Telegram Cloud Storage:', error);
+            showNotification('Ошибка загрузки из облака. Загружаю локальные...', 'error');
+            return SaveSystem.load();
+        }
+    },
+    
+    // Восстанавливаем состояние игры из данных
+    restoreGameState(saveData) {
+        // Восстанавливаем основные данные
+        Object.assign(GameState, saveData.gameState);
+        
+        // Восстанавливаем объекты
+        GameState.objects = saveData.objects || [];
+        
+        // Восстанавливаем NPC
+        GameState.npcs = saveData.npcs || [];
+        
+        // Восстанавливаем разблокированные предметы
+        if (saveData.unlockedItems) {
+            Object.keys(UNLOCKED_ITEMS).forEach(key => {
+                UNLOCKED_ITEMS[key] = saveData.unlockedItems[key] || false;
+            });
+        }
+        
+        // Восстанавливаем задания
+        if (saveData.quests) {
+            QuestSystem.activeQuests = saveData.quests.activeQuests || [];
+            QuestSystem.completedQuests = saveData.quests.completedQuests || [];
+            QuestSystem.failedQuests = saveData.quests.failedQuests || [];
+            QuestSystem.stats = saveData.quests.stats || QuestSystem.stats;
+        }
+        
+        // Восстанавливаем камеру
+        if (saveData.camera) {
+            camera.x = saveData.camera.x || camera.x;
+            camera.y = saveData.camera.y || camera.y;
+            camera.zoom = saveData.camera.zoom || camera.zoom;
+        }
+        
+        // Восстанавливаем связи рабочих мест
+        this.restoreWorkstationLinks();
+        
+        // Обновляем UI
+        updateUI();
+        updateTechDebtUI();
+        updateQuestUI();
+    },
+    
+    // Восстанавливаем связи между NPC и рабочими местами
+    restoreWorkstationLinks() {
+        GameState.objects.forEach(obj => {
+            if (obj.id === 'workstation_basic') {
+                obj.isOccupied = false;
+                obj.currentWorker = null;
+            }
+        });
+        
+        GameState.npcs.forEach(npc => {
+            if (npc.currentWorkstation) {
+                const workstation = GameState.objects.find(obj => 
+                    obj.x === npc.currentWorkstation.x && 
+                    obj.y === npc.currentWorkstation.y &&
+                    obj.id === 'workstation_basic'
+                );
+                if (workstation) {
+                    workstation.isOccupied = true;
+                    workstation.currentWorker = npc;
+                    npc.currentWorkstation = workstation;
+                } else {
+                    npc.currentWorkstation = null;
+                }
+            }
+        });
+    },
+    
+    // Уведомление о сохранении
+    showSaveNotification(message) {
+        const notification = document.createElement('div');
+        notification.className = 'save-notification';
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.remove();
+        }, 2000);
+    },
+    
+    // Очистить сохранение в облаке
+    async clearCloudSave() {
+        try {
+            if (!TelegramWebApp.isActive || !TelegramWebApp.supportsCloudStorage) {
+                return false;
+            }
+            
+            await Telegram.WebApp.CloudStorage.removeItem(this.SAVE_KEY);
+            showNotification('☁️ Облачное сохранение очищено!', 'success');
+            return true;
+        } catch (error) {
+            console.error('Ошибка очистки облачного сохранения:', error);
+            return false;
+        }
+    },
+    
+    // Получить информацию о сохранении
+    async getSaveInfo() {
+        try {
+            if (!TelegramWebApp.isActive || !TelegramWebApp.supportsCloudStorage) {
+                return null;
+            }
+            
+            const saved = await Telegram.WebApp.CloudStorage.getItem(this.SAVE_KEY);
+            if (!saved) return null;
+            
+            const saveData = JSON.parse(saved);
+            return {
+                exists: true,
+                version: saveData.version,
+                timestamp: saveData.timestamp,
+                date: new Date(saveData.timestamp).toLocaleString()
+            };
+        } catch (error) {
+            console.error('Ошибка получения информации о сохранении:', error);
+            return null;
+        }
+    }
+};
+
+        // ==================== MOBILE UI АДАПТАЦИЯ ====================
+        const GameUI = {
+            isMobile: false,
+            
+            init() {
+                this.isMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                
+                if (this.isMobile) {
+                    this.adaptForMobile();
+                }
+                
+                const isTelegram = TelegramWebApp.init();
+                
+                if (!isTelegram) {
+                    document.getElementById('mobile-menu-btn')?.classList.add('mobile-hidden');
+                }
+                
+                this.initEventListeners();
+            },
+            
+            adaptForMobile() {
+                console.log('Adapting for mobile device');
+                const workBtn = document.getElementById('work-btn');
+                if (workBtn) {
+                    workBtn.style.fontSize = '1.2rem';
+                    workBtn.style.padding = '18px';
+                }
+                
+                // Настройка камеры для мобильных
+                if (this.isMobile) {
+                    // Уменьшаем масштаб камеры для мобильных
+                    camera.zoom = 0.6;
+                    
+                    // Центрируем камеру
+                    centerCamera();
+                    
+                    // Уменьшаем размер плитки для мобильных
+                    CONFIG.tileSize = 48;
+                }
+                
+                // ВНИМАНИЕ: Блок кода с panels.forEach был удален отсюда!
+            },
+            initEventListeners() {
+                document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+                    this.showMenu();
+                });
+                
+                document.getElementById('mobile-assign-btn')?.addEventListener('click', () => {
+                    this.closeMenu();
+                    if (window.assignWorkers) window.assignWorkers();
+                });
+                
+                document.addEventListener('click', (e) => {
+                    const menu = document.getElementById('mobile-menu');
+                    const menuBtn = document.getElementById('mobile-menu-btn');
+                    if (menu && !menu.contains(e.target) && !menuBtn?.contains(e.target) && !menu.classList.contains('hidden')) {
+                        this.closeMenu();
+                    }
+                });
+            },
+            
+            showMenu() {
+                const menu = document.getElementById('mobile-menu');
+                if (menu) menu.classList.remove('hidden');
+            },
+            
+            closeMenu() {
+                const menu = document.getElementById('mobile-menu');
+                if (menu) menu.classList.add('hidden');
+            }
+        };
+
+        // ==================== КОНФИГУРАЦИЯ ====================
+        const CONFIG = {
+            tileSize: 64,
+            colors: {
+                floor: '#f1f5f9',
+                gridStroke: 'rgba(0, 0, 0, 0.03)',
+                background: '#e2e8f0'
+            }
+        };
+
+        // ==================== СИСТЕМА КАМЕРЫ ====================
+        const CameraSystem = {
+            // Вычисляем границы для камеры
+            getCameraBounds() {
+                const ts = CONFIG.tileSize * camera.zoom;
+                const gridSize = GameState.gridSize;
+                
+                // Центр сетки в изометрической проекции
+                const centerGridX = gridSize / 2;
+                const centerGridY = gridSize / 2;
+                
+                // Координаты центра сетки в изометрической проекции
+                const isoCenter = {
+                    x: (centerGridX - centerGridY) * ts,
+                    y: (centerGridX + centerGridY) * (ts / 2)
+                };
+                
+                // Вычисляем размеры видимой области камеры
+                const visibleWidth = canvas.width;
+                const visibleHeight = canvas.height;
+                
+                // Вычисляем максимальные смещения
+                const maxOffsetX = Math.abs(isoCenter.x) + visibleWidth * 0.5;
+                const maxOffsetY = Math.abs(isoCenter.y) + visibleHeight * 0.5;
+                
+                // Базовые позиции (центр экрана)
+                const baseX = canvas.width / 2;
+                const baseY = canvas.height / 2;
+                
+                return {
+                    minX: baseX - maxOffsetX,
+                    maxX: baseX + maxOffsetX,
+                    minY: baseY - maxOffsetY,
+                    maxY: baseY + maxOffsetY
+                };
+            },
+            
+            // Ограничиваем камеру в пределах границ
+            clampCamera() {
+                const bounds = this.getCameraBounds();
+                
+                // Ограничиваем по X
+                camera.x = Math.max(bounds.minX, Math.min(bounds.maxX, camera.x));
+                
+                // Ограничиваем по Y
+                camera.y = Math.max(bounds.minY, Math.min(bounds.maxY, camera.y));
+            },
+            
+            // Обновляем позицию камеры с проверкой границ
+            updateCamera(dx, dy) {
+                camera.x += dx;
+                camera.y += dy;
+                this.clampCamera();
+            }
+        };
+
+        // Функция для центрирования камеры на игровом поле
+        function centerCamera() {
+            const ts = CONFIG.tileSize * camera.zoom;
+            const gridSize = GameState.gridSize;
+            
+            // Центр сетки в изометрической проекции
+            const centerGridX = gridSize / 2;
+            const centerGridY = gridSize / 2;
+            
+            const isoCenter = {
+                x: (centerGridX - centerGridY) * ts,
+                y: (centerGridX + centerGridY) * (ts / 2)
+            };
+            
+            // Центрируем камеру так, чтобы центр сетки был в центре экрана
+            camera.x = canvas.width / 2 - isoCenter.x;
+            camera.y = canvas.height / 2 - isoCenter.y;
+            
+            // Корректируем камеру
+            CameraSystem.clampCamera();
+        }
+
+        // ==================== ИГРОВЫЕ ОБЪЕКТЫ ====================
+        const ITEM_TYPES = {
+            workstation_basic: {
+                id: 'workstation_basic',
+                name: 'Базовое рабочее место',
+                cost: 700,
+                // desc: 'Полное рабочее место Dev: стол, кресле, ПК +5 код/сек',
+                income: 5,
+                renderType: 'workstation',
+                type: 'workstation',
+                maxWorkers: 1,
+                size: 1,
+                colorPrimary: '#94a3b8',
+                colorSecondary: '#3b82f6'
+            },
+            server_rack: {
+                id: 'server_rack',
+                name: 'Сервер',
+                cost: 1200,
+                // desc: '+15 Код/сек',
+                income: 15,
+                renderType: 'server',
+                colorPrimary: '#1e1e1e',
+                colorSecondary: '#22c55e',
+                size: 1
+            },
+            plant: {
+                id: 'plant',
+                name: 'Фикус',
+                cost: 25,
+                desc: 'Создает уют в офисе',
+                income: 0,
+                renderType: 'plant',
+                colorPrimary: '#16a34a',
+                colorSecondary: '#78350f',
+                size: 1
+            },
+            employee_dev: {
+                id: 'employee_dev',
+                name: 'Junior Dev',
+                cost: 2500,
+                // desc: '+30 код/сек, ходит по офису',
+                income: 30,
+                renderType: 'npc',
+                speed: 0.02,
+                colorBody: '#3b82f6',
+                colorHead: '#fbbf24',
+                colorAccent: '#ef4444'
+            },
+            employee_manager: {
+                id: 'employee_manager',
+                name: 'Team Lead',
+                cost: 5000,
+                // desc: '+60 код/сек, бустит команду',
+                income: 60,
+                renderType: 'npc',
+                speed: 0.015,
+                colorBody: '#8b5cf6',
+                colorHead: '#ffffff',
+                colorAccent: '#10b981'
+            },
+            coffee_machine: {
+                id: 'coffee_machine',
+                name: 'Кофемашина',
+                cost: 800,
+                desc: '-20% стресса у сотрудников',
+                renderType: 'appliance',
+                effect: { stressReduction: 0.2 },
+                size: 1
+            },
+            whiteboard: {
+                id: 'whiteboard',
+                name: 'Маркерная доска',
+                cost: 300,
+                desc: '+10% к эффективности встреч',
+                renderType: 'board',
+                effect: { meetingEfficiency: 1.1 },
+                size: 1
+            }
+        };
+
+        // ==================== СИСТЕМА ПРОГРЕССИИ (TYCOON MATH) ====================
+        function getCurrentItemStats(itemId) {
+            const item = ITEM_TYPES[itemId];
+            if (!item) return { cost: 0, income: 0 };
+            
+            // Считаем, сколько таких предметов уже куплено (на карте)
+            const count = [...GameState.objects, ...GameState.npcs].filter(o => o.id === itemId).length;
+            
+            // Формула стоимости: База * (5 в степени количества)
+            const currentCost = item.cost * Math.pow(5, count);
+            
+            // Формула дохода: База * (2 в степени количества)
+            const currentIncome = item.income ? item.income * Math.pow(2, count) : 0;
+            
+            return { cost: currentCost, income: currentIncome };
+        }
+
+        // ==================== СИСТЕМА ЗАДАНИЙ ====================
+        const QUESTS = {
+            intro: {
+                id: 'intro',
+                title: "Первый фриланс",
+                description: "Напиши простой лендинг для пиццерии. Нужно 50 строк кода.",
+                type: "coding",
+                requirement: { action: "click", amount: 50 },
+                reward: { money: 300, xp: 100 },
+                nextQuest: "first_hire",
+                unlock: ["workstation_basic"]
+            },
+            first_hire: {
+                id: 'first_hire',
+                title: "Расширяемся",
+                description: "Нужен помощник! Нанять первого Junior разработчика.",
+                type: "hiring",
+                requirement: { action: "buy", item: "employee_dev", amount: 1 },
+                reward: { money: 500, xp: 250, item: "coffee_machine" },
+                nextQuest: "expand_server", // ИЗМЕНЕНО: Следующий квест — открытие серверной
+                unlock: ["coffee_machine"]
+            },
+            // --- НОВЫЙ КВЕСТ ---
+            expand_server: {
+                id: 'expand_server',
+                title: "Место для железа",
+                description: "Нам нужно место для серверов. Купи Серверную комнату!",
+                type: "expansion",
+                requirement: { action: "unlock_room", item: "server_room", amount: 1 },
+                reward: { money: 800, xp: 300 },
+                nextQuest: "server_setup"
+            },
+            server_setup: {
+                id: 'server_setup',
+                title: "Серверная инфраструктура",
+                description: "Клиент хочет масштабируемый бэкенд. Установи первый сервер.",
+                type: "infrastructure",
+                requirement: { action: "buy", item: "server_rack", amount: 1 },
+                reward: { money: 1200, xp: 500, reputation: 10 },
+                nextQuest: "bug_hunt"
+            },
+            bug_hunt: {
+                id: 'bug_hunt',
+                title: "Охота на баги",
+                description: "Критический баг в продакшене! Найди и исправь 20 багов.",
+                type: "coding",
+                requirement: { action: "bug_fix", amount: 20 },
+                reward: { money: 800, xp: 400, reputation: 15 },
+                nextQuest: "expand_lounge" // ИЗМЕНЕНО: Следующий квест — комната отдыха
+            },
+            // --- НОВЫЙ КВЕСТ ---
+            expand_lounge: {
+                id: 'expand_lounge',
+                title: "Забота о сотрудниках",
+                description: "Люди устают. Открой Комнату отдыха (Lounge).",
+                type: "expansion",
+                requirement: { action: "unlock_room", item: "break_room", amount: 1 },
+                reward: { money: 1000, xp: 400, item: "plant" },
+                nextQuest: "team_management"
+            },
+            team_management: {
+                id: 'team_management',
+                title: "Управление командой",
+                description: "Нанять Team Lead для управления разработчиками.",
+                type: "hiring",
+                requirement: { action: "buy", item: "employee_manager", amount: 1 },
+                reward: { money: 2000, xp: 800, reputation: 25 },
+                nextQuest: "expand_meeting", // ИЗМЕНЕНО: Следующий квест — переговорка
+                unlock: ["employee_manager"]
+            },
+            // --- НОВЫЙ КВЕСТ ---
+            expand_meeting: {
+                id: 'expand_meeting',
+                title: "Бизнес встречи",
+                description: "Нужно место для обсуждения стратегий. Открой Переговорную.",
+                type: "expansion",
+                requirement: { action: "unlock_room", item: "meeting_room", amount: 1 },
+                reward: { money: 2500, xp: 1000, reputation: 50 },
+                unlock: ["whiteboard"]
+            }
+        };
+
+        const QuestSystem = {
+            activeQuests: [],
+            completedQuests: [],
+            failedQuests: [],
+            stats: {
+                bugsFixed: 0,
+                linesCoded: 0,
+                projectsDelivered: 0,
+                clientsSatisfied: 0,
+                serversDeployed: 0
+            },
+            
+            startQuest(questId) {
+                const quest = QUESTS[questId];
+                if (!quest || this.activeQuests.find(q => q.id === questId)) return;
+                
+                const activeQuest = {
+                    ...quest,
+                    startTime: Date.now(),
+                    progress: { current: 0, total: quest.requirement.amount },
+                    timer: quest.timeLimit || null
+                };
+                
+                this.activeQuests.push(activeQuest);
+                this.showQuestNotification(quest);
+                updateQuestUI();
+                
+                // ПРОВЕРКА НА АВТО-ВЫПОЛНЕНИЕ (Если комната уже куплена)
+                if (quest.requirement.action === 'unlock_room') {
+                    const room = RoomSystem.rooms.find(r => r.id === quest.requirement.item);
+                    if (room && !room.isLocked) {
+                        // Если комната уже открыта, сразу засчитываем прогресс
+                        this.updateProgress('unlock_room', 1, quest.requirement.item);
+                    }
+                }
+
+                if (quest.timeLimit) {
+                    setTimeout(() => {
+                        if (this.activeQuests.includes(activeQuest)) {
+                            this.failQuest(questId);
+                        }
+                    }, quest.timeLimit * 1000);
+                }
+            },
+            
+            updateProgress(action, amount = 1, itemId = null) {
+                this.activeQuests.forEach(quest => {
+                    if (quest.requirement.action === action) {
+                        // Для покупки и открытия комнат проверяем ID предмета/комнаты
+                        if ((action === 'buy' || action === 'unlock_room') && itemId !== quest.requirement.item) return;
+                        
+                        quest.progress.current += amount;
+                        this.checkCompletion(quest);
+                        updateQuestUI();
+                    }
+                });
+            },
+            
+            checkCompletion(quest) {
+                if (quest.progress.current >= quest.progress.total) {
+                    this.completeQuest(quest.id);
+                }
+            },
+            
+            completeQuest(questId) {
+                const quest = QUESTS[questId];
+                const activeIndex = this.activeQuests.findIndex(q => q.id === questId);
+                
+                if (activeIndex !== -1) {
+                    GameState.tsp += quest.reward.money || 0;
+                    GameState.xp = (GameState.xp || 0) + (quest.reward.xp || 0);
+                    GameState.reputation += quest.reward.reputation || 0;
+                    
+                    if (quest.unlock) {
+                        quest.unlock.forEach(itemId => {
+                            UNLOCKED_ITEMS[itemId] = true;
+                        });
+                    }
+                    
+                    if (quest.reward.item) {
+                        GameState.tsp += ITEM_TYPES[quest.reward.item].cost * 0.5;
+                        showNotification(`Получен бонус: ${ITEM_TYPES[quest.reward.item].name}!`, 'success');
+                    }
+                    
+                    this.completedQuests.push(questId);
+                    this.activeQuests.splice(activeIndex, 1);
+                    
+                    if (quest.nextQuest && !this.activeQuests.find(q => q.id === quest.nextQuest)) {
+                        setTimeout(() => this.startQuest(quest.nextQuest), 2000);
+                    }
+                    
+                    this.showQuestComplete(quest);
+                    updateQuestUI();
+                    updateUI();
+                }
+            },
+            
+            failQuest(questId) {
+                const activeIndex = this.activeQuests.findIndex(q => q.id === questId);
+                if (activeIndex !== -1) {
+                    this.failedQuests.push(questId);
+                    this.activeQuests.splice(activeIndex, 1);
+                    showNotification('Задание провалено! Время вышло.', 'error');
+                    updateQuestUI();
+                }
+            },
+            
+            showQuestNotification(quest) {
+                showNotification(`Новое задание: ${quest.title}`, 'quest');
+            },
+            
+            showQuestComplete(quest) {
+                showNotification(`✅ Задание выполнено: ${quest.title} (+$${quest.reward.money})`, 'success');
+            }
+        };
+
+        // ==================== СИСТЕМА КОМНАТ ====================
+       const RoomSystem = {
+    rooms: [
+        {
+            id: 'dev_room',
+            name: 'Dev Zone', 
+            x: 2, y: 2,           // Moved inwards
+            width: 7, height: 9,  // Slightly larger
+            allowedItems: ['workstation_basic', 'employee_dev', 'employee_manager'],
+            color: '#3b82f6',     // Blue floor
+            isLocked: false,
+            entrance: { x: 5, y: 2 } 
+        },
+        {
+            id: 'server_room',
+            name: 'Server Room', 
+            x: 12, y: 2, 
+            width: 5, height: 6,
+            allowedItems: ['server_rack'],
+            color: '#10b981',     // Green floor
+            isLocked: true,
+            entrance: { x: 10, y: 4 }
+        },
+        {
+            id: 'meeting_room',
+            name: 'Meeting', 
+            x: 12, y: 11,
+            width: 5, height: 4,
+            allowedItems: ['whiteboard'],
+            color: '#8b5cf6',     // Purple floor
+            isLocked: true,
+            entrance: { x: 10, y: 9 }
+        },
+        {
+            id: 'break_room',
+            name: 'Lounge', 
+            x: 2, y: 13,
+            width: 7, height: 4,
+            allowedItems: ['coffee_machine', 'plant'],
+            color: '#f59e0b',     // Orange floor
+            isLocked: true,
+            entrance: { x: 5, y: 12 }
+        }
+    ],
+    
+        // Логика получения комнаты для предмета (твоя автоматизация)
+    getRoomForItem(itemId) {
+        if (itemId === 'server_rack') return this.rooms.find(r => r.id === 'server_room');
+        if (itemId === 'coffee_machine' || itemId === 'plant') return this.rooms.find(r => r.id === 'break_room');
+        if (itemId === 'whiteboard') return this.rooms.find(r => r.id === 'meeting_room');
+        return this.rooms.find(r => r.id === 'dev_room');
+    },
+
+    // --- Helpers ---
+    getRoomAt(x, y) {
+        return this.rooms.find(room => 
+            x >= room.x && x < room.x + room.width &&
+            y >= room.y && y < room.y + room.height
+        );
+    },
+    
+    getRoomForItem(itemId) {
+        const item = ITEM_TYPES[itemId];
+        if (!item) return null;
+        if (item.id === 'server_rack') return this.rooms.find(r => r.id === 'server_room');
+        if (item.id === 'whiteboard') return this.rooms.find(r => r.id === 'meeting_room');
+        if (item.id === 'coffee_machine') return this.rooms.find(r => r.id === 'break_room');
+        // Default to Dev Room for everything else
+        return this.rooms.find(r => r.id === 'dev_room');
+    },
+
+    canPlaceInRoom(itemId, roomId) {
+        const room = this.rooms.find(r => r.id === roomId);
+        return room && room.allowedItems.includes(itemId);
+    },
+
+    findFreeSpotInRoom(roomId, itemSize = 1) {
+        const room = this.rooms.find(r => r.id === roomId);
+        if (!room) return null;
+        for (let y = room.y + 1; y < room.y + room.height - itemSize; y++) {
+            for (let x = room.x + 1; x < room.x + room.width - itemSize; x++) {
+                if (!OfficeLayout.isPositionOccupied(x, y, itemSize)) return { x, y };
+            }
+        }
+        return null;
+    },
+    
+    isInCorrectRoom(npc, workstation) {
+        const npcRoom = this.getRoomAt(Math.floor(npc.x), Math.floor(npc.y));
+        const workstationRoom = this.getRoomAt(workstation.x, workstation.y);
+        return npcRoom && workstationRoom && npcRoom.id === workstationRoom.id;
+    },
+
+    // --- HIGH WHITE WALLS RENDERING ---
+    drawWalls() {
+        const ts = CONFIG.tileSize * camera.zoom;
+        const wallHeight = 2.0; // High walls (2 tiles high)
+
+        this.rooms.forEach(room => {
+            // 1. Draw Floor (Colored)
+            const p0 = toIso(room.x, room.y);
+            const p1 = toIso(room.x + room.width, room.y);
+            const p2 = toIso(room.x + room.width, room.y + room.height);
+            const p3 = toIso(room.x, room.y + room.height);
+
+            ctx.save();
+            ctx.globalAlpha = 1; // Slightly transparent floor to see grid
+            ctx.fillStyle = room.color; 
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p3.x, p3.y);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            // 2. Wall Drawing Helper
+            const drawWallSegment = (x, y, isHorizontal, isBackWall) => {
+    if (Math.floor(x) === room.entrance.x && Math.floor(y) === room.entrance.y) return;
+
+    // 1. Увеличиваем высоту передних стен (было 0.2, ставим например 0.8)
+    const currentH = isBackWall ? wallHeight : 0.8; 
+    
+    // 2. Делаем стены плотнее (было 0.15 для передних, ставим 0.5 или выше)
+    const alpha = isBackWall ? 1.0 : 0.5; 
+    
+    const from = toIso(x, y, 0);
+    const to = isHorizontal ? toIso(x + 1, y, 0) : toIso(x, y + 1, 0);
+    const fromTop = toIso(x, y, currentH);
+    const toTop = isHorizontal ? toIso(x + 1, y, currentH) : toIso(x, y + 1, currentH);
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    
+    // 3. Можно сделать цвета стен контрастнее
+    ctx.fillStyle = isHorizontal ? '#ffffff' : '#f1f5f9'; 
+    
+    // Отрисовка основной грани стены
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.lineTo(toTop.x, toTop.y);
+    ctx.lineTo(fromTop.x, fromTop.y);
+    ctx.closePath();
+    ctx.fill();
+
+    // 4. ДОБАВЛЯЕМ ОБВОДКУ (это сделает стены очень четкими)
+    ctx.strokeStyle = '#94a3b8'; // Серый контур
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Отрисовка верхней кромки стены (Cap)
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(fromTop.x, fromTop.y);
+    ctx.lineTo(toTop.x, toTop.y);
+    ctx.lineTo(toTop.x, toTop.y - 4); // Толщина ободка сверху
+    ctx.lineTo(fromTop.x, fromTop.y - 4);
+    ctx.closePath();
+    ctx.fill();
+    
+    ctx.restore();
+};
+
+            // 3. Draw Back Walls (High & Opaque) - North & West
+            // North Wall
+            for (let i = 0; i < room.width; i++) drawWallSegment(room.x + i, room.y, true, true);
+            // West Wall
+            for (let i = 0; i < room.height; i++) drawWallSegment(room.x, room.y + i, false, true);
+
+            // 4. Draw Front Walls (Low & Transparent) - South & East
+            // South Wall
+            for (let i = 0; i < room.width; i++) drawWallSegment(room.x + i, room.y + room.height, true, false);
+            // East Wall
+            for (let i = 0; i < room.height; i++) drawWallSegment(room.x + room.width, room.y + i, false, false);
+
+            // 5. Room Label
+            const center = toIso(room.x + room.width/2, room.y + room.height/2);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = 'black';
+            ctx.shadowBlur = 4;
+            ctx.fillText(room.name, center.x, center.y);
+            ctx.shadowBlur = 0;
+        });
+    }
+};
+
+        // ==================== СИСТЕМА АВТОМАТИЧЕСКОГО РАЗМЕЩЕНИЯ ====================
+        const OfficeLayout = {
+    // Finds the next empty slot based on the item type and room rules
+    getNextSlot(itemId) {
+        const item = ITEM_TYPES[itemId];
+        if (!item) return null;
+        
+        // 1. Find the correct room for this item
+        const targetRoom = RoomSystem.getRoomForItem(itemId);
+        if (!targetRoom) {
+            console.warn(`No room found for ${itemId}`);
+            return null;
+        }
+
+        // 2. Scan that room for free space (accounting for walls)
+        // We start at +1 and end at -1 to avoid placing items inside the walls
+        const size = item.size || 1;
+        for (let y = targetRoom.y + 1; y < targetRoom.y + targetRoom.height - size; y++) {
+            for (let x = targetRoom.x + 1; x < targetRoom.x + targetRoom.width - size; x++) {
+                if (!this.isPositionOccupied(x, y, size)) {
+                    return { x, y };
+                }
+            }
+        }
+        
+        return null; // Room is full
+    },
+
+    isPositionOccupied(x, y, size) {
+        // Check collision with other objects
+        return GameState.objects.some(obj => {
+            const objSize = ITEM_TYPES[obj.id]?.size || 1;
+            return (
+                x < obj.x + objSize &&
+                x + size > obj.x &&
+                y < obj.y + objSize &&
+                y + size > obj.y
+            );
+        });
+    }
+};
+
+        // ==================== СИСТЕМА РАЗМЕЩЕНИЯ ====================
+        const PlacementSystem = {
+    isPlacing: false,
+    currentItem: null,
+    previewX: 0,
+    previewY: 0,
+
+    // Start manual placement (User clicks shop item)
+    startPlacement(itemId) {
+        const item = ITEM_TYPES[itemId];
+        if (!item) return;
+        
+        this.isPlacing = true;
+        this.currentItem = item;
+        document.getElementById('shop-panel').classList.add('hidden');
+        showNotification(`Place ${item.name}. Click to confirm.`, 'info');
+    },
+
+    // Handle Auto-Placement (When buying directly)
+        buyAndPlaceAutomatically(itemId) {
+            const item = ITEM_TYPES[itemId];
+            const stats = getCurrentItemStats(itemId); // Получаем динамическую цену
+            
+            // 1. Check Money
+            if (GameState.tsp < stats.cost) {
+                showNotification(`Недостаточно средств! Нужно: $${stats.cost}`, 'error');
+                return false;
+            }
+
+            // 2. Find Slot
+            const slot = OfficeLayout.getNextSlot(itemId);
+            if (!slot) {
+                const room = RoomSystem.getRoomForItem(itemId);
+                showNotification(`Нет свободного места в ${room ? room.name : 'офисе'}!`, 'error');
+                return false;
+            }
+
+            // 3. Place Object
+            return this.placeObject(slot.x, slot.y, itemId, true);
+        },
+
+        // Core Placement Logic
+        placeObject(x, y, itemId = null, isAutomatic = false) {
+            const item = itemId ? ITEM_TYPES[itemId] : this.currentItem;
+            if (!item) return false;
+
+            if (!this.checkPosition(x, y, item)) {
+                if (!isAutomatic) showNotification('Вы не можете строить здесь!', 'error');
+                return false;
+            }
+
+            // СЧИТАЕМ ЦЕНУ И ДОХОД *ДО* ТОГО, КАК ДОБАВИМ ПРЕДМЕТ В МАССИВ!
+            const stats = getCurrentItemStats(item.id);
+
+            // Списываем правильную сумму
+            if (GameState.tsp < stats.cost) return false;
+            GameState.tsp -= stats.cost;
+
+            // Create Entity
+            if (item.renderType === 'npc') {
+                GameState.npcs.push({
+                    id: item.id,
+                    name: item.name,
+                    x: x + 0.5, y: y + 0.5,
+                    targetX: x + 0.5, targetY: y + 0.5,
+                    state: 'idle',
+                    fatigue: 0,
+                    speed: item.speed || 0.02
+                });
+            } else {
+                GameState.objects.push({
+                    id: item.id,
+                    x: x, y: y,
+                    ...(item.type === 'workstation' ? { isOccupied: false, currentWorker: null } : {})
+                });
+            }
+
+            // УВЕЛИЧИВАЕМ ДОХОД НА НОВЫЙ ДИНАМИЧЕСКИЙ ПОКАЗАТЕЛЬ
+            if (stats.income > 0) GameState.autoClicker += stats.income;
+            
+            QuestSystem.updateProgress('buy', 1, item.id);
+            
+            // Показываем красивый всплывающий текст с правильной ценой
+            spawnFloatingText(`-$${stats.cost}`, toIso(x, y).x + camera.x, toIso(x, y).y + camera.y, '#ef4444');
+            updateUI();
+            SaveSystem.save();
+
+            if (!isAutomatic) this.cancelPlacement();
+            return true;
+        },
+
+    // --- FIX: Updated Check Function ---
+    checkPosition(x, y, itemOrId) {
+        // Resolve the item object correctly
+        const item = (typeof itemOrId === 'object') ? itemOrId : 
+                     (ITEM_TYPES[itemOrId] || this.currentItem);
+        
+        if (!item) return false;
+        const size = item.size || 1;
+
+        // 1. Map Boundaries
+        if (x < 0 || y < 0 || x + size > GameState.gridSize || y + size > GameState.gridSize) return false;
+
+        // 2. Room Rules
+        const room = RoomSystem.getRoomAt(x, y);
+        if (!room) return false; // Must be in a room
+        if (!RoomSystem.canPlaceInRoom(item.id, room.id)) return false; // Must be allowed item
+
+        // 3. Collision (Check if space is occupied)
+        if (OfficeLayout.isPositionOccupied(x, y, size)) return false;
+
+        return true;
+    },
+
+    cancelPlacement() {
+        this.isPlacing = false;
+        this.currentItem = null;
+    },
+
+    // Preview for Manual Mode
+    renderPreview() {
+        if (!this.isPlacing || !this.currentItem) return;
+        
+        const isValid = this.checkPosition(this.previewX, this.previewY, this.currentItem);
+        const iso = toIso(this.previewX, this.previewY);
+        
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = isValid ? '#22c55e' : '#ef4444';
+        
+        // Draw simple square preview
+        const p0 = toIso(this.previewX, this.previewY);
+        const p1 = toIso(this.previewX + 1, this.previewY + 1);
+        // (Simplified drawing logic for brevity, fits your existing style)
+        ctx.beginPath();
+        ctx.arc(p0.x, p0.y + 20, 10, 0, Math.PI*2); 
+        ctx.fill();
+        
+        ctx.restore();
+    },
+    
+    updatePreview(x, y) {
+        this.previewX = x;
+        this.previewY = y;
+    }
+};
+
+        // ==================== СИСТЕМА РАБОТЫ ====================
+        const WorkSystem = {
+            findAvailableWorkstation() {
+                return GameState.objects.find(obj => {
+                    const itemType = ITEM_TYPES[obj.id];
+                    return itemType && itemType.type === 'workstation' && !obj.isOccupied;
+                });
+            },
+
+            findNearestCoffeeMachine(npc) {
+                // Find all coffee machines
+                const machines = GameState.objects.filter(obj => obj.id === 'coffee_machine');
+                if (machines.length === 0) return null;
+
+                // Find the closest one
+                let nearest = null;
+                let minDist = Infinity;
+
+                machines.forEach(machine => {
+                    const dist = Math.sqrt(Math.pow(machine.x - npc.x, 2) + Math.pow(machine.y - npc.y, 2));
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = machine;
+                    }
+                });
+                return nearest;
+            },
+            
+            assignToWorkstation(npc, workstation) {
+                // Проверяем, что NPC может добраться до рабочего места
+                if (!RoomSystem.isInCorrectRoom(npc, workstation)) {
+                    // Если NPC не в правильной комнате, сначала отправляем его туда
+                    const room = RoomSystem.getRoomAt(workstation.x, workstation.y);
+                    if (room && room.entrance) {
+                        npc.state = 'going_to_room';
+                        npc.targetRoom = room.id;
+                        npc.targetX = room.entrance.x + 0.5;
+                        npc.targetY = room.entrance.y + 0.5;
+                        return false;
+                    }
+                }
+                
+                // Стандартная логика назначения
+                if (!workstation.isOccupied) {
+                    npc.state = 'going_to_work';
+                    npc.targetWorkstation = workstation;
+                    npc.targetX = workstation.x + 0.5;
+                    npc.targetY = workstation.y + 0.5;
+                    
+                    workstation.isOccupied = true;
+                    workstation.currentWorker = npc;
+                    npc.currentWorkstation = workstation;
+                    return true;
+                }
+                return false;
+            },
+            
+            releaseWorkstation(workstation) {
+                if (workstation && workstation.currentWorker) {
+                    const npc = workstation.currentWorker;
+                    workstation.currentWorker = null;
+                    workstation.isOccupied = false;
+                    npc.currentWorkstation = null;
+                    npc.targetWorkstation = null;
+                }
+            },
+            
+            updateWorkers() {
+                GameState.npcs.forEach(npc => {
+                    // Новая логика для перехода между комнатами
+                    if (npc.state === 'going_to_room') {
+                        const dist = Math.sqrt(
+                            Math.pow(npc.targetX - npc.x, 2) + 
+                            Math.pow(npc.targetY - npc.y, 2)
+                        );
+                        
+                        if (dist < 0.3) {
+                            // Достигли входа в комнату, теперь идем к рабочему месту
+                            if (npc.targetWorkstation) {
+                                npc.state = 'going_to_work';
+                                npc.targetX = npc.targetWorkstation.x + 0.5;
+                                npc.targetY = npc.targetWorkstation.y + 0.5;
+                            } else {
+                                npc.state = 'idle';
+                            }
+                        }
+                    }
+                    
+                    // 1. Logic for IDLE state
+                    if (npc.state === 'idle') {
+                        if (Math.random() < 0.05) {
+                            const workstation = this.findAvailableWorkstation();
+                            if (workstation) {
+                                this.assignToWorkstation(npc, workstation);
+                            } else {
+                                // Wander around if no work
+                                const room = RoomSystem.getRoomAt(Math.floor(npc.x), Math.floor(npc.y));
+                                if (room) {
+                                    // Блуждаем только в пределах комнаты
+                                    npc.targetX = Math.max(room.x + 1, Math.min(room.x + room.width - 2, npc.x + (Math.random() * 4 - 2)));
+                                    npc.targetY = Math.max(room.y + 1, Math.min(room.y + room.height - 2, npc.y + (Math.random() * 4 - 2)));
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 2. Logic for COMMUTE (Going to work)
+                    else if (npc.state === 'going_to_work') {
+                        const dist = Math.sqrt(
+                            Math.pow(npc.targetX - npc.x, 2) + 
+                            Math.pow(npc.targetY - npc.y, 2)
+                        );
+                        
+                        // If arrived at desk
+                        if (dist < 0.3 && npc.targetWorkstation) {
+                            npc.state = 'working';
+                            npc.x = npc.targetWorkstation.x + 0.5; // Snap to chair
+                            npc.y = npc.targetWorkstation.y + 0.5;
+                        }
+                    }
+                    
+                    // 3. Logic for WORKING
+                    else if (npc.state === 'working') {
+                        // Increase fatigue
+                        npc.fatigue = Math.min(100, npc.fatigue + 0.05);
+                        
+                        // === NEW: Increase Tech Debt slowly while working ===
+                        if (Math.random() < 0.005) { // Small chance every frame
+                            GameState.techDebt = Math.min(100, GameState.techDebt + 0.5);
+                            updateTechDebtUI();
+                        }
+
+                        // If too tired, go rest
+                        if (npc.fatigue >= 80) {
+                            this.releaseWorkstation(npc.currentWorkstation);
+                            
+                            // Try to find coffee
+                            const coffeeMachine = this.findNearestCoffeeMachine(npc);
+                            
+                            if (coffeeMachine) {
+                                npc.state = 'going_to_coffee';
+                                npc.targetX = coffeeMachine.x + 0.5;
+                                npc.targetY = coffeeMachine.y + 0.5;
+                                showNotification(`${npc.name} идет за кофе`, 'info');
+                            } else {
+                                npc.state = 'resting'; // Just stand there if no coffee machine
+                                npc.targetX = npc.x + (Math.random() * 2 - 1);
+                                npc.targetY = npc.y + (Math.random() * 2 - 1);
+                            }
+                        }
+                    }
+
+                    // 4. Logic for GOING TO COFFEE
+                    else if (npc.state === 'going_to_coffee') {
+                        const dist = Math.sqrt(
+                            Math.pow(npc.targetX - npc.x, 2) + 
+                            Math.pow(npc.targetY - npc.y, 2)
+                        );
+                        
+                        if (dist < 0.5) {
+                            npc.state = 'resting'; // Start drinking
+                        }
+                    }
+                    
+                    // 5. Logic for RESTING (Drinking coffee)
+                    else if (npc.state === 'resting') {
+                        // Recover faster
+                        npc.fatigue = Math.max(0, npc.fatigue - 0.5);
+                        
+                        // Back to work when rested
+                        if (npc.fatigue <= 0) {
+                            npc.state = 'idle';
+                        }
+                    }
+                });
+            }
+        };
+
+        // ==================== СИСТЕМА СОХРАНЕНИЯ ====================
+
+        // 1. Инициализация Базы Данных
+        // ВСТАВЬ СЮДА ДАННЫЕ ИЗ ШАГА 1 (п. 8)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDY1BJYHCwFb-VUZONJEiIHks0JpRrNJSs",
+            authDomain: "store-tycoon-db.firebaseapp.com",
+            projectId: "store-tycoon-db",
+            storageBucket: "store-tycoon-db.firebasestorage.app",
+            messagingSenderId: "870966114241",
+            appId: "1:870966114241:web:d0614817085f37a7c42140"
+        };
+        
+        // Запускаем Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // 2. Новая система сохранений
+        const SaveSystem = {
+    SAVE_KEY: 'storetycoon_save',
+
+    getPlayerId() {
+        if (window.Telegram && Telegram.WebApp && Telegram.WebApp.initDataUnsafe && Telegram.WebApp.initDataUnsafe.user) {
+            return Telegram.WebApp.initDataUnsafe.user.id.toString();
+        }
+        let localId = localStorage.getItem('test_player_id');
+        if (!localId) {
+            localId = 'guest_' + Math.floor(Math.random() * 1000000);
+            localStorage.setItem('test_player_id', localId);
+        }
+        return localId;
+    },
+
+    // ✅ NEW: Always save to localStorage as a backup
+    _localSave() {
+        try {
+            const snapshot = {
+                tsp: GameState.tsp,
+                tst: GameState.tst,
+                clickPower: GameState.clickPower,
+                autoClicker: GameState.autoClicker,
+                incomeMultiplier: GameState.incomeMultiplier,
+                gridSize: GameState.gridSize,
+                xp: GameState.xp,
+                reputation: GameState.reputation,
+                level: GameState.level,
+                companyLevel: GameState.companyLevel,
+                techDebt: GameState.techDebt,
+                limits: GameState.limits,
+                roomPrices: GameState.roomPrices,
+                objects: GameState.objects,
+                npcs: GameState.npcs.map(npc => ({
+                    id: npc.id, name: npc.name,
+                    x: npc.x, y: npc.y,
+                    state: npc.state, fatigue: npc.fatigue,
+                    speed: npc.speed,
+                    targetX: npc.targetX, targetY: npc.targetY,
+                    currentWorkstation: npc.currentWorkstation
+                        ? { x: npc.currentWorkstation.x, y: npc.currentWorkstation.y, id: npc.currentWorkstation.id }
+                        : null
+                })),
+                bugs: GameState.bugs,
+                isServerDown: GameState.isServerDown,
+                serverCrashTime: GameState.serverCrashTime,
+                lastSaveTime: Date.now()
+            };
+            localStorage.setItem(this.SAVE_KEY, JSON.stringify(snapshot));
+            return true;
+        } catch (e) {
+            console.warn('localStorage save failed:', e);
+            return false;
+        }
+    },
+
+    // ✅ NEW: Load from localStorage
+    _localLoad() {
+        try {
+            const raw = localStorage.getItem(this.SAVE_KEY);
+            if (!raw) return false;
+            const data = JSON.parse(raw);
+            Object.assign(GameState, data);
+            this.restoreWorkstationLinks();
+            console.log('💾 Прогресс загружен из localStorage (резервная копия)');
+            return true;
+        } catch (e) {
+            console.warn('localStorage load failed:', e);
+            return false;
+        }
+    },
+
+    async save() {
+        this._localSave(); // Всегда оставляем локальную копию для страховки
+
+        // Берем строку авторизации от Telegram
+        const initData = window.Telegram?.WebApp?.initData;
+
+        if (!initData) {
+            console.warn("Игра запущена вне Telegram. Сохранение только локально.");
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    initData: window.Telegram?.WebApp?.initData, // Передаем на сервер крипто-строку
+                    progress: GameState 
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                console.log('✅ Прогресс надежно сохранен на сервере');
+                this.showSaveNotification();
+            } else {
+                console.error('Ошибка сервера:', result.error);
+            }
+        } catch (error) {
+            console.warn("⚠️ Ошибка связи с сервером (возможно, VPN блокирует запрос):", error);
+        }
+    },
+
+    async load() {
+        const initData = window.Telegram?.WebApp?.initData;
+
+        if (initData) {
+            try {
+                const response = await fetch('/api/load', {
+                    method: 'POST', // Меняем на POST, чтобы передать initData в body
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ initData: initData })
+                });
+
+                const data = await response.json();
+                if (data.success && data.progress) {
+                    Object.assign(GameState, data.progress);
+                    this.restoreWorkstationLinks();
+                    this._localSave();
+                    console.log("✅ Прогресс загружен с сервера");
+                    return true;
+                }
+            } catch (e) { 
+                console.warn("☁️ Сервер недоступен, пробуем локальное хранилище"); 
+            }
+        }
+
+        return this._localLoad();
+    },
+
+    ensureBaseItemsUnlocked() {
+        const baseItems = [
+            'workstation_basic', 'plant',
+            'employee_dev', 'coffee_machine', 'employee_manager',
+            'server_rack', 'whiteboard'
+        ];
+        baseItems.forEach(item => { UNLOCKED_ITEMS[item] = true; });
+    },
+
+    restoreWorkstationLinks() {
+        GameState.objects.forEach(obj => {
+            if (obj.id === 'workstation_basic' && !obj.hasOwnProperty('isOccupied')) {
+                obj.isOccupied = false;
+                obj.currentWorker = null;
+            }
+        });
+        GameState.npcs.forEach(npc => {
+            if (npc.currentWorkstation) {
+                const workstation = GameState.objects.find(obj =>
+                    obj.x === npc.currentWorkstation.x &&
+                    obj.y === npc.currentWorkstation.y &&
+                    obj.id === 'workstation_basic'
+                );
+                if (workstation) {
+                    workstation.isOccupied = true;
+                    workstation.currentWorker = npc;
+                    npc.currentWorkstation = workstation;
+                } else {
+                    npc.currentWorkstation = null;
+                }
+            }
+        });
+    },
+
+    showSaveNotification() {
+        const notification = document.createElement('div');
+        notification.className = 'save-notification';
+        notification.textContent = '💾 Игра сохранена';
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+};
+
+        // ==================== ИГРОВОЕ СОСТОЯНИЕ ====================
+        const GameState = {
+            tsp: 100, // Исправлено: теперь только tsp
+            companyLevel: 1,
+            // Лимиты предметов для 1-го уровня
+            limits: {
+                'workstation_basic': 2,
+                'employee_dev': 2,
+                'server_rack': 1,
+                'employee_manager': 1,
+                'plant': 1,
+                'coffee_machine': 1,
+                'whiteboard': 1
+            },
+            // Цены на покупку новых комнат
+            roomPrices: {
+                'server_room': 3000000,
+                'break_room': 1000000,
+                'meeting_room': 500000
+            },
+            tst: 0,
+            clickPower: 1,
+            autoClicker: 0,
+            incomeMultiplier: 1,
+            objects: [],
+            npcs: [],
+            gridSize: 18, // Увеличили для комнат
+            xp: 0,
+            reputation: 0,
+            level: 1,
+            lastNpcUpdate: Date.now(),
+            techDebt: 0,
+            bugs: [],
+            startTime: Date.now(),
+            isServerDown: false,
+            serverCrashTime: 0
+        };
+
+        // Разблокированные предметы
+        const UNLOCKED_ITEMS = {
+            workstation_basic: true,
+            plant: true,
+            employee_dev: true,
+            coffee_machine: true,
+            employee_manager: true,
+            server_rack: true,
+            whiteboard: true
+        };
+
+        // ==================== ГРАФИКА ====================
+        // Инициализация спрайтов
+        let workstationSprite = null;
+        let coffeeMachineSprite = null;
+        let npcSpriteSheet = null;
+        let serverSprite = null;
+        let isWorkstationSpriteLoaded = false;
+        let isCoffeeMachineSpriteLoaded = false;
+        let isNPCSpriteLoaded = false;
+        let isServerSpriteLoaded = false;
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Камера
+        let camera = { x: 300, y: 300, zoom: 1 };
+
+        let drag = { active: false, x: 0, y: 0 };
+        let particles = [];
+        let bugEffects = [];
+        let mousePos = { x: 0, y: 0 };
+
+        // Функция resize() 
+        function resize() {
+    // 1. Get the device pixel ratio (1 for PC, 2-3 for phones)
+    const dpr = window.devicePixelRatio || 1;
+    
+    // 2. Set the "Physical" size (High Res)
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    
+    // 3. Set the "CSS" size (Logical size) - keeps it fitting the screen
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    
+    // 4. Normalize the coordinate system
+    // This ensures your drawing logic (x, y) stays the same, but draws deeper pixels
+    ctx.scale(dpr, dpr);
+
+    // 5. Config for Mobile vs PC
+    if (window.innerWidth <= 768) {
+        // Try increasing zoom slightly (0.6 or 0.7) to see details better
+        camera.zoom = 0.65; 
+        CONFIG.tileSize = 48;
+    } else {
+        camera.zoom = 0.8;
+        CONFIG.tileSize = 64;
+    }
+    
+    // 6. CRITICAL: Turn off blurry smoothing for crisp sprites
+    ctx.imageSmoothingEnabled = false; 
+
+    centerCamera();
+}
+        window.addEventListener('resize', resize);
+
+        // Функция toIso() 
+        function toIso(gx, gy, z = 0) {
+            return {
+                x: (gx - gy) * CONFIG.tileSize * camera.zoom + camera.x,
+                y: (gx + gy) * (CONFIG.tileSize * camera.zoom / 2) - (z * CONFIG.tileSize * camera.zoom) + camera.y
+            };
+        }
+
+        // Функция screenToGrid()
+        function screenToGrid(screenX, screenY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = (screenX - rect.left - camera.x) / (CONFIG.tileSize * camera.zoom);
+            const y = (screenY - rect.top - camera.y) / (CONFIG.tileSize * camera.zoom);
+            
+            const gx = Math.floor((x + y) / 2);
+            const gy = Math.floor((y - x) / 2);
+            
+            return { gx, gy };
+        }
+
+        function initSprites() {
+            // Спрайт рабочего места
+            workstationSprite = new Image();
+            workstationSprite.onload = function() {
+                console.log('Спрайт рабочего места загружен');
+                isWorkstationSpriteLoaded = true;
+            };
+            workstationSprite.onerror = function() {
+                console.warn('Не удалось загрузить спрайт рабочего места. Используем запасной вариант.');
+                isWorkstationSpriteLoaded = false;
+            };
+            workstationSprite.src = './workstation_full.png';
+            
+            // Спрайт сервера
+            serverSprite = new Image();
+            serverSprite.onload = function() {
+                console.log('Спрайт сервера загружен');
+                isServerSpriteLoaded = true;
+            };
+            serverSprite.onerror = function() {
+                console.warn('Не удалось загрузить спрайт рабочего места. Используем запасной вариант.');
+                isServerSpriteLoaded = false;
+            }
+            serverSprite.src = './data_server.png';
+
+            // Спрайт кофемашины
+            coffeeMachineSprite = new Image();
+            coffeeMachineSprite.onload = function() {
+                console.log('Спрайт кофемашины загружен');
+                isCoffeeMachineSpriteLoaded = true;
+            };
+            coffeeMachineSprite.onerror = function() {
+                console.warn('Не удалось загрузить спрайт кофемашины. Используем запасной вариант.');
+                isCoffeeMachineSpriteLoaded = false;
+            };
+            coffeeMachineSprite.src = './coffee.png';
+
+            // Спрайт-лист NPC
+            npcSpriteSheet = new Image();
+            npcSpriteSheet.onload = function() {
+                console.log('NPC спрайт загружен');
+                isNPCSpriteLoaded = true;
+            };
+            npcSpriteSheet.onerror = function() {
+                console.warn('Не удалось загрузить NPC спрайт');
+                isNPCSpriteLoaded = false;
+            };
+            npcSpriteSheet.src = './npc.png';
+        }
+
+        // --- УЛУЧШЕННЫЙ РЕНДЕР КУБА ---
+        function drawVoxel(gx, gy, z, w, d, h, color) {
+            const ts = CONFIG.tileSize * camera.zoom;
+            const hPx = h * ts;
+
+            const p0 = toIso(gx, gy, z);
+            const p1 = toIso(gx + w, gy, z);
+            const p2 = toIso(gx + w, gy + d, z);
+            const p3 = toIso(gx, gy + d, z);
+
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 1;
+            
+            // Левая грань
+            const cLeft = shadeColor(color, -15);
+            ctx.fillStyle = cLeft;
+            ctx.strokeStyle = cLeft;
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.lineTo(p3.x, p3.y);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Правая грань
+            const cRight = shadeColor(color, -30);
+            ctx.fillStyle = cRight;
+            ctx.strokeStyle = cRight;
+            ctx.beginPath();
+            ctx.moveTo(p2.x, p2.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.lineTo(p1.x, p1.y - hPx);
+            ctx.lineTo(p2.x, p2.y - hPx);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Верхняя грань
+            ctx.fillStyle = color;
+            ctx.strokeStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y - hPx);
+            ctx.lineTo(p1.x, p1.y - hPx);
+            ctx.lineTo(p2.x, p2.y - hPx);
+            ctx.lineTo(p3.x, p3.y - hPx);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Блик
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y - hPx);
+            ctx.lineTo(p2.x, p2.y - hPx);
+            ctx.stroke();
+        }
+
+        // Запасной вариант отрисовки рабочего места
+        function drawFallbackWorkstation(ctx, width, height, type, obj) {
+            const isOccupied = obj.isOccupied;
+            
+            // Стол
+            ctx.fillStyle = '#78350f';
+            ctx.fillRect(-width/2, -height/3, width, height/3);
+            
+            // Стул
+            ctx.fillStyle = type.colorPrimary;
+            ctx.fillRect(-width/3, height/6, width/3, height/3);
+            
+            // Монитор
+            const screenColor = isOccupied ? '#86efac' : '#cbd5e1';
+            ctx.fillStyle = screenColor;
+            ctx.fillRect(-width/4, -height/3, width/2, height/4);
+            
+            // Системный блок
+            ctx.fillStyle = '#475569';
+            ctx.fillRect(width/4, -height/6, width/4, height/3);
+            
+            // Клавиатура
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(-width/3, -height/6, width/2, height/12);
+            
+            if (isOccupied) {
+                ctx.fillStyle = '#22c55e';
+                ctx.beginPath();
+                ctx.arc(width/3, -height/4, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Запасной вариант отрисовки сервера
+        function drawFallbackServer(ctx, width, height, type, obj) {
+            // 1. Draw the main rack body (black/dark grey)
+            ctx.fillStyle = '#1e1e1e'; 
+            ctx.fillRect(-width/2, -height/2, width, height);
+            
+            // 2. Draw server slots (stripes)
+            ctx.fillStyle = '#334155'; // Lighter grey for slots
+            const slotHeight = height / 6;
+            for(let i = 0; i < 5; i++) {
+                ctx.fillRect(-width/2 + 2, -height/2 + 4 + (i * slotHeight), width - 4, slotHeight - 2);
+            }
+            
+            // 3. Blinking LED light
+            const time = Date.now() / 200;
+            if (Math.sin(time) > 0) {
+                ctx.fillStyle = '#22c55e'; // Green light
+                ctx.beginPath();
+                ctx.arc(width/3, -height/2 + 8, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Запасной вариант отрисовки кофемашины
+        function drawFallbackCoffeeMachine(ctx, width, height, type, obj) {
+            // Основание
+            ctx.fillStyle = '#4b5563';
+            ctx.fillRect(-width/2, height/6, width, height/3);
+            
+            // Корпус
+            ctx.fillStyle = '#d1d5db';
+            ctx.fillRect(-width/3, -height/6, width * 0.66, height/2);
+            
+            // Панель управления
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(-width/4, -height/3, width/2, height/6);
+            
+            // Кнопки
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.arc(-width/6, -height/4, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#3b82f6';
+            ctx.beginPath();
+            ctx.arc(width/6, -height/4, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Индикатор работы
+            const coffeeTime = Date.now() / 1000;
+            if (Math.sin(coffeeTime * 2) > 0.7) {
+                ctx.fillStyle = '#22c55e';
+                ctx.beginPath();
+                ctx.arc(0, -height/3, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Логотип
+            ctx.fillStyle = '#78350f';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('☕', 0, height/4);
+        }
+
+        // --- РЕНДЕРЕРЫ ОБЪЕКТОВ ---
+        const Renderers = {
+
+            workstation: (obj, type) => {
+                const iso = toIso(obj.x, obj.y);
+                const ts = CONFIG.tileSize * camera.zoom;
+                const width = ts * 1.2;
+                const height = ts * 1.2;
+                
+                ctx.save();
+                ctx.translate(iso.x, iso.y - ts * 0.1);
+                
+                // Спрайт или запасной вариант
+                if (workstationSprite && isWorkstationSpriteLoaded && workstationSprite.complete) {
+                    try {
+                        ctx.drawImage(workstationSprite, -width/2, -height/2, width, height);
+                        
+                    } catch (e) {
+                        console.warn('Ошибка при отрисовке спрайта:', e);
+                        drawFallbackWorkstation(ctx, width, height, type, obj);
+                    }
+                } else {
+                    drawFallbackWorkstation(ctx, width, height, type, obj);
+                }
+                
+                ctx.restore();
+                
+                // УДАЛЕНО: надпись "💻 Занято" над рабочим столом
+            },
+            
+            server: (obj, type) => {
+                const iso = toIso(obj.x, obj.y);
+                const ts = CONFIG.tileSize * camera.zoom;
+                const width = ts * 1.4;  // Сервер немного шире
+                const height = ts * 1.6; // И выше
+            
+                ctx.save();
+                ctx.translate(iso.x, iso.y - ts * 0.1); // Сервер на полу
+            
+            // Спрайт сервера или запасной вариант
+            if (serverSprite && isServerSpriteLoaded && serverSprite.complete) {
+                try {
+                    console.log('Отрисовываем спрайт сервера');
+                    
+                    // Получаем оригинальные размеры изображения
+                    const originalWidth = serverSprite.naturalWidth || serverSprite.width;
+                    const originalHeight = serverSprite.naturalHeight || serverSprite.height;
+                    
+                    console.log('Server sprite dimensions:', {
+                        originalWidth,
+                        originalHeight,
+                        aspectRatio: originalWidth / originalHeight
+                    });
+                    
+                    // Вычисляем пропорции для максимальной высоты
+                    const maxHeight = ts * 1.8; // Серверы выше
+                    const scale = maxHeight / originalHeight;
+                    const scaledWidth = originalWidth * scale;
+                    const scaledHeight = maxHeight;
+                    
+                    // Центрируем изображение
+                    const x = -scaledWidth / 2;
+                    const y = -scaledHeight / 2;
+                    
+                    // Отрисовываем спрайт
+                    ctx.drawImage(serverSprite, x, y, scaledWidth, scaledHeight);
+                    
+                } catch (e) {
+                    console.warn('Ошибка при отрисовке спрайта сервера:', e);
+                    drawFallbackServer(ctx, width, height, type, obj);
+                }
+            } else {
+                console.log('Используем запасной вариант отрисовки сервера');
+                drawFallbackServer(ctx, width, height, type, obj);
+            }
+            
+            ctx.restore();
+            
+            // Индикатор производительности
+            if (type.income > 0) {
+                ctx.fillStyle = '#22c55e';
+                ctx.font = 'bold 10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`+${type.income}`, iso.x, iso.y + 40);
+            }
+        },
+            
+            plant: (obj, type) => {
+                drawVoxel(obj.x + 0.3, obj.y + 0.3, 0, 0.4, 0.4, 0.4, type.colorSecondary);
+                drawVoxel(obj.x + 0.45, obj.y + 0.45, 0.4, 0.1, 0.1, 0.4, type.colorPrimary);
+                drawVoxel(obj.x + 0.25, obj.y + 0.25, 0.7, 0.5, 0.5, 0.4, shadeColor(type.colorPrimary, 10));
+            },
+            
+            npc: (npc, type) => {
+                const ts = CONFIG.tileSize * camera.zoom;
+                const iso = toIso(npc.x, npc.y);
+                
+                let stateColor = type.colorBody;
+                let stateIndicator = '';
+                
+                switch(npc.state) {
+                    case 'working':
+                        stateColor = shadeColor(type.colorBody, 20);
+                        stateIndicator = '💻';
+                        break;
+                    case 'going_to_work':
+                        stateColor = shadeColor(type.colorBody, 10);
+                        stateIndicator = '🚶‍♂️';
+                        break;
+                    case 'resting':
+                        stateColor = shadeColor(type.colorBody, -20);
+                        stateIndicator = '☕';
+                        break;
+                    case 'going_to_room':
+                        stateColor = shadeColor(type.colorBody, 30);
+                        stateIndicator = '🚪';
+                        break;
+                    default:
+                        stateIndicator = '🔄';
+                }
+        
+        // ==== ПРОВЕРЯЕМ СПРАЙТ (используем isNPCSpriteLoaded) ====
+        if (npcSpriteSheet && isNPCSpriteLoaded && npcSpriteSheet.complete) {
+            ctx.save();
+            ctx.translate(iso.x, iso.y - ts * 0.1);
+            
+            // Анимация в зависимости от состояния
+            if (npc.state === 'working') {
+                // Анимация работы
+                const workFloat = Math.sin(Date.now() / 800) * 3;
+                const workTilt = Math.sin(Date.now() / 600) * 0.05;
+                ctx.translate(0, workFloat);
+                ctx.rotate(workTilt);
+            } else if (npc.state === 'going_to_work' || npc.state === 'going_to_room') {
+                // Анимация ходьбы
+                const walkBounce = Math.abs(Math.sin(Date.now() / 200)) * 4;
+                const walkSway = Math.sin(Date.now() / 150) * 2;
+                ctx.translate(walkSway, -walkBounce);
+            } else if (npc.state === 'resting') {
+                // Анимация отдыха
+                const restFloat = Math.sin(Date.now() / 1000) * 2;
+                ctx.translate(0, restFloat);
+            } else {
+                // Анимация покоя
+                const idleFloat = Math.sin(Date.now() / 1200) * 2;
+                ctx.translate(0, idleFloat);
+            }
+            
+            // ==== СОХРАНЯЕМ ОРИГИНАЛЬНЫЕ ПРОПОРЦИИ ====
+            try {
+                // Получаем оригинальные размеры изображения
+                const originalWidth = npcSpriteSheet.naturalWidth || npcSpriteSheet.width;
+                const originalHeight = npcSpriteSheet.naturalHeight || npcSpriteSheet.height;
+                
+                console.log('NPC sprite dimensions:', {
+                    originalWidth,
+                    originalHeight,
+                    aspectRatio: originalWidth / originalHeight
+                });
+                
+                // Задаем максимальную высоту (относительно размера плитки)
+                const maxHeight = ts * 1.5;
+                
+                // Вычисляем пропорциональную ширину
+                const scale = maxHeight / originalHeight;
+                const width = originalWidth * scale;
+                const height = maxHeight;
+                
+                // Позиционируем по центру
+                const x = -width / 2;
+                const y = -height / 2;
+                
+                // Рисуем спрайт с сохранением пропорций
+                ctx.drawImage(npcSpriteSheet, x, y, width, height);
+                
+            } catch (e) {
+                console.warn('Ошибка при отрисовке NPC спрайта:', e);
+                // Запасной вариант - фиксированный размер
+                const spriteSize = ts * 0.8;
+                ctx.drawImage(npcSpriteSheet, -spriteSize/2, -spriteSize/2, spriteSize, spriteSize);
+            }
+            
+            ctx.restore();
+        } else {
+            // ==== СТАРАЯ 3D-ОТРИСОВКА ====
+            let walkOffset = 0;
+            let heightOffset = 0;
+            
+            if (npc.state === 'working') {
+                walkOffset = Math.sin(npc.frame * 0.8) * 2;
+                heightOffset = 0.5 + Math.sin(npc.frame * 1.5) * 0.05;
+            } else if (npc.state !== 'working') {
+                walkOffset = Math.sin(npc.frame * 0.5) * 3;
+                heightOffset = 0.5 + Math.abs(Math.sin(npc.frame * 0.5)) * 0.1;
+            }
+            
+            // Ноги
+            if (npc.state !== 'working') {
+                const legOffset = walkOffset;
+                drawVoxel(
+                    npc.x + 0.25, 
+                    npc.y + 0.35, 
+                    0.1, 
+                    0.2, 0.3, 0.5 + (legOffset > 0 ? legOffset * 0.05 : 0), 
+                    stateColor
+                );
+                drawVoxel(
+                    npc.x + 0.55, 
+                    npc.y + 0.35, 
+                    0.1, 
+                    0.2, 0.3, 0.5 + (legOffset < 0 ? -legOffset * 0.05 : 0), 
+                    stateColor
+                );
+            } else {
+                drawVoxel(npc.x + 0.35, npc.y + 0.4, 0.1, 0.3, 0.4, 0.4, stateColor);
+            }
+
+            // Тело
+            drawVoxel(
+                npc.x + 0.25, 
+                npc.y + 0.25, 
+                0.6 + heightOffset * 0.1, 
+                0.5, 0.5, 0.6, 
+                shadeColor(stateColor, -10)
+            );
+            
+            // Голова
+            drawVoxel(
+                npc.x + 0.35, 
+                npc.y + 0.35, 
+                1.2 + heightOffset * 0.1, 
+                0.3, 0.3, 0.3, 
+                type.colorHead
+            );
+        }
+        
+        // ==== УДАЛЕНЫ индикатор состояния и имя над NPC ====
+        
+        // Полоска усталости (оставлена, т.к. это полезная информация)
+        if (npc.fatigue > 30) {
+            const barWidth = 30 * camera.zoom;
+            const barHeight = 4 * camera.zoom;
+            const fatiguePercent = npc.fatigue / 100;
+            
+            ctx.fillStyle = '#374151';
+            ctx.fillRect(iso.x - barWidth/2, iso.y - ts * 1.6, barWidth, barHeight);
+            
+            const r = Math.min(255, Math.floor(255 * fatiguePercent));
+            const g = Math.max(0, Math.floor(255 * (1 - fatiguePercent)));
+            ctx.fillStyle = `rgb(${r}, ${g}, 0)`;
+            ctx.fillRect(iso.x - barWidth/2, iso.y - ts * 1.6, barWidth * fatiguePercent, barHeight);
+        }
+    },
+            
+            appliance: (obj, type) => {
+        // Проверяем, это кофемашина или другой прибор
+        if (obj.id === 'coffee_machine') {
+            const iso = toIso(obj.x, obj.y);
+            const ts = CONFIG.tileSize * camera.zoom;
+            
+            ctx.save();
+            ctx.translate(iso.x, iso.y - ts * 0);
+            
+            // Спрайт кофемашины или запасной вариант
+            if (coffeeMachineSprite && isCoffeeMachineSpriteLoaded && coffeeMachineSprite.complete) {
+                try {
+                    // Вычисляем размеры с сохранением пропорций оригинального изображения
+                    const originalWidth = coffeeMachineSprite.naturalWidth || coffeeMachineSprite.width;
+                    const originalHeight = coffeeMachineSprite.naturalHeight || coffeeMachineSprite.height;
+                    
+                    console.log('Coffee machine sprite dimensions:', {
+                        originalWidth,
+                        originalHeight,
+                        tileSize: ts
+                    });
+                    
+                    // Задаем максимальную высоту (относительно размера плитки)
+                    const maxHeight = ts * 0.8;
+                    
+                    // Вычисляем пропорциональную ширину
+                    const scale = maxHeight / originalHeight;
+                    const width = originalWidth * scale;
+                    const height = maxHeight;
+                    
+                    // Позиционируем по центру
+                    const x = -width / 2;
+                    const y = -height / 2;
+                    
+                    // Рисуем спрайт с сохранением пропорций
+                    ctx.drawImage(coffeeMachineSprite, x, y, width, height);
+        
+                    
+                } catch (e) {
+                    console.warn('Ошибка при отрисовке спрайта кофемашины:', e);
+                    drawFallbackCoffeeMachine(ctx, ts * 1.0, ts * 1.2, type, obj);
+                }
+            } else {
+                drawFallbackCoffeeMachine(ctx, ts * 1.0, ts * 1.2, type, obj);
+            }
+            
+            ctx.restore();
+        } else {
+            // Для других приборов используем стандартный рендерер
+            drawVoxel(obj.x + 0.2, obj.y + 0.2, 0, 0.6, 0.6, 0.8, '#4b5563');
+            drawVoxel(obj.x + 0.3, obj.y + 0.3, 0.8, 0.4, 0.4, 0.2, '#d1d5db');
+            
+            const coffeeTime = Date.now() / 1000;
+            if (Math.sin(coffeeTime * 2) > 0.7) {
+                drawVoxel(obj.x + 0.35, obj.y + 0.35, 1.0, 0.1, 0.1, 0.1, '#78350f');
+            }
+        }
+    },
+            
+            board: (obj, type) => {
+                drawVoxel(obj.x, obj.y, 0, 1, 0.1, 1.5, '#f8fafc');
+                
+                const iso = toIso(obj.x + 0.5, obj.y + 0.05, 1.0);
+                ctx.fillStyle = '#0f172a';
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('TODO:', iso.x, iso.y);
+                ctx.font = '10px Arial';
+                ctx.fillText('• Fix bugs', iso.x, iso.y + 15);
+                ctx.fillText('• Deploy', iso.x, iso.y + 30);
+            }
+        };
+
+        // ==================== СИСТЕМА NPC ====================
+        function updateNPCs() {
+            const now = Date.now();
+            const delta = Math.min((now - (GameState.lastNpcUpdate || now)) / 16, 2);
+            GameState.lastNpcUpdate = now;
+
+            // 1. Run the AI (Decide where to go)
+            WorkSystem.updateWorkers();
+
+            // 2. Physics (Actually move pixels)
+            GameState.npcs.forEach(npc => {
+                const dx = npc.targetX - npc.x;
+                const dy = npc.targetY - npc.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                // Movement Speed
+                const moveSpeed = (npc.speed || 0.02) * delta;
+
+                if (dist > 0.05 && npc.state !== 'working') {
+                    const angle = Math.atan2(dy, dx);
+                    npc.x += Math.cos(angle) * moveSpeed;
+                    npc.y += Math.sin(angle) * moveSpeed;
+                    
+                    // Animation: Increment frame only when moving
+                    npc.frame = (npc.frame || 0) + 0.15 * delta;
+                } else {
+                    // Standing still
+                    npc.frame = 0; 
+                    
+                    // If they are idle and reached target, give them a new random target eventually
+                    if (npc.state === 'idle' && Math.random() < 0.01) {
+                        const room = RoomSystem.getRoomAt(Math.floor(npc.x), Math.floor(npc.y));
+                        if (room) {
+                            // Блуждаем только в пределах комнаты
+                            npc.targetX = Math.max(room.x + 1, Math.min(room.x + room.width - 2, npc.x + (Math.random() * 6 - 3)));
+                            npc.targetY = Math.max(room.y + 1, Math.min(room.y + room.height - 2, npc.y + (Math.random() * 6 - 3)));
+                        }
+                    }
+                }
+            });
+        }
+
+        // ==================== ВИЗУАЛЬНЫЕ ЭФФЕКТЫ ====================
+        function createBugEffect(x, y, severity) {
+            bugEffects.push({
+                x, y,
+                severity,
+                particles: Array.from({length: 6}, (_, i) => ({
+                    angle: (i / 6) * Math.PI * 2,
+                    distance: 0,
+                    maxDistance: severity === 'critical' ? 30 * camera.zoom : 20 * camera.zoom,
+                    speed: severity === 'critical' ? 2 : 1.5
+                })),
+                color: severity === 'critical' ? '#ef4444' : '#f59e0b',
+                life: 1
+            });
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.02;
+                p.vy += 0.05;
+                
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+            
+            for (let i = bugEffects.length - 1; i >= 0; i--) {
+                const bug = bugEffects[i];
+                bug.life -= 0.01;
+                
+                for (const particle of bug.particles) {
+                    particle.distance = Math.min(particle.distance + particle.speed, particle.maxDistance);
+                }
+                
+                if (bug.life <= 0) {
+                    bugEffects.splice(i, 1);
+                }
+            }
+        }
+
+        function drawParticles() {
+            particles.forEach(p => {
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.font = `bold ${p.size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.fillText(p.char, p.x, p.y);
+                ctx.restore();
+            });
+            
+            bugEffects.forEach(bug => {
+                const iso = toIso(bug.x, bug.y);
+                bug.particles.forEach(particle => {
+                    const px = iso.x + Math.cos(particle.angle) * particle.distance;
+                    const py = iso.y + Math.sin(particle.angle) * particle.distance;
+                    
+                    ctx.save();
+                    ctx.globalAlpha = bug.life;
+                    ctx.fillStyle = bug.color;
+                    ctx.beginPath();
+                    ctx.arc(px, py, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                });
+            });
+        }
+
+        // ==================== ГЕНЕРАЦИЯ БАГОВ ====================
+        function generateBug() {
+            // Увеличиваем базовую вероятность и делаем зависимость от техдолга более выраженной
+            let chance = 0.10; // 10% каждый кадр - было 0.005
+            
+            // Более агрессивное увеличение шанса с техдолгом
+            if (GameState.techDebt > 10) chance = 0.10;    // 10%
+            if (GameState.techDebt > 20) chance = 0.20;    // 20%
+            if (GameState.techDebt > 30) chance = 0.30;    // 30%
+            if (GameState.techDebt > 40) chance = 0.40;    // 40%
+            if (GameState.techDebt > 50) chance = 0.50;    // 50%
+            if (GameState.techDebt > 60) chance = 0.60;    // 60%
+            if (GameState.techDebt > 70) chance = 0.70;    // 70%
+            if (GameState.techDebt > 80) chance = 0.80;    // 80%
+            if (GameState.techDebt > 90) chance = 0.90;    // 90%
+            
+            // Также увеличиваем частоту вызова этой функции
+            if (Math.random() < chance) {
+                const severity = GameState.techDebt > 70 ? 'critical' : 
+                                GameState.techDebt > 40 ? 'medium' : 'low';
+                
+                const bug = {
+                    id: Date.now(),
+                    x: 1 + Math.random() * (GameState.gridSize - 2),
+                    y: 1 + Math.random() * (GameState.gridSize - 2),
+                    severity,
+                    reward: severity === 'critical' ? 50 : 
+                           severity === 'medium' ? 25 : 10,
+                    fixTime: 30
+                };
+                
+                GameState.bugs.push(bug);
+                createBugEffect(bug.x, bug.y, severity);
+                
+                // УДАЛЕНО: уведомление о новом баге
+                
+                updateTechDebtUI();
+                
+                // Отладочная информация
+                console.log(`Создан баг (техдолг: ${GameState.techDebt}%, шанс: ${chance*100}%)`);
+                
+                setTimeout(() => {
+                    const index = GameState.bugs.findIndex(b => b.id === bug.id);
+                    if (index !== -1) {
+                        GameState.bugs.splice(index, 1);
+                        console.log('Баг исчез (время вышло)');
+                    }
+                }, bug.fixTime * 1000);
+            }
+        }
+
+        function fixBug(bugId) {
+            const bugIndex = GameState.bugs.findIndex(b => b.id === bugId);
+            if (bugIndex !== -1) {
+                const bug = GameState.bugs[bugIndex];
+                GameState.tsp += bug.reward;
+                GameState.techDebt = Math.max(0, GameState.techDebt - (bug.severity === 'critical' ? 10 : 5));
+                QuestSystem.updateProgress('bug_fix', 1);
+                GameState.bugs.splice(bugIndex, 1);
+                updateUI();
+                updateTechDebtUI();
+                spawnFloatingText(`+$${bug.reward}`, 
+                    toIso(bug.x, bug.y).x + camera.x, 
+                    toIso(bug.x, bug.y).y + camera.y, 
+                    '#22c55e');
+            }
+        }
+
+        // ==================== МАГАЗИН СКИНОВ (ЛОГИКА) ====================
+        const SKINS_DATA = [
+            { id: 'npc1', name: 'Стажер', rarity: 'common', price: 100, img: './npc_skin_defult/npc1.png', desc: 'Молодой и амбициозный. Работает за опыт и печеньки.' },
+            { id: 'npc2', name: 'Джуниор', rarity: 'common', price: 250, img: './npc_skin_defult/npc2.png', desc: 'Уже знает как центрировать div. Почти.' },
+            { id: 'npc3', name: 'Мидл', rarity: 'common', price: 500, img: './npc_skin_defult/npc3.png', desc: 'Способен написать код, который работает больше одного дня.' },
+            { id: 'npc4', name: 'Сборщик', rarity: 'common', price: 800, img: './npc_skin_defult/npc4.png', desc: 'Отвечает за железо. Суров и молчалив.' },
+            { id: 'npc5', name: 'Сеньор', rarity: 'epic', price: 2000, img: './npc_skin_defult/npc5.png', desc: 'Видел вещи, в которые вы бы не поверили. Спорит с архитекторами.' },
+            { id: 'npc6', name: 'Тимлид', rarity: 'epic', price: 3500, img: './npc_skin_defult/npc6.png', desc: 'Больше не пишет код, только смотрит в Jira и вздыхает.' },
+            { id: 'npc7', name: 'Девопс', rarity: 'epic', price: 5000, img: './npc_skin_defult/npc7.png', desc: 'Управляет серверами силой мысли и баш-скриптами.' },
+            { id: 'pepe', name: 'Пепе', rarity: 'legendary', price: 15000, img: './npc_skin_lega/pepe.png', desc: 'Легендарный мемный разработчик. Приносит удачу на релизах.' },
+            { id: 'freedur', name: 'Фридур', rarity: 'legendary', price: 25000, img: './npc_skin_lega/freedur.png', desc: 'Мифическое существо IT-мира. Никто никогда не видел его багов.' }
+        ];
+
+        const RARITY_STYLES = {
+            common: { color: 'text-slate-400', border: 'border-slate-500', bg: 'bg-slate-800', name: 'Обычный' },
+            epic: { color: 'text-purple-400', border: 'border-purple-500', bg: 'bg-purple-900/40', name: 'Эпический', glow: 'shadow-[0_0_15px_rgba(168,85,247,0.4)]' },
+            legendary: { color: 'text-yellow-400', border: 'border-yellow-400', bg: 'bg-yellow-900/40', name: 'Легендарный', glow: 'shadow-[0_0_20px_rgba(250,204,21,0.6)]' }
+        };
+
+        let selectedSkin = null;
+
+        // СОСТОЯНИЕ (В идеале подтянуть из твоего SaveSystem)
+        let playerSkins = ['npc1']; // Список ID купленных скинов
+        let currentSkinId = 'npc1'; // Что надето сейчас
+
+        window.toggleSkinsShop = function() {
+            const panel = document.getElementById('skinsShopPanel');
+            const settingsBtn = document.getElementById('settingsBtn');
+            
+            if (panel.classList.contains('hidden')) {
+                panel.classList.remove('hidden');
+                if(settingsBtn) settingsBtn.classList.add('hidden');
+                renderSkins();
+                // Анимация появления
+                setTimeout(() => {
+                    panel.classList.remove('scale-95', 'opacity-0');
+                    panel.classList.add('scale-100', 'opacity-100');
+                }, 10);
+            } else {
+                panel.classList.remove('scale-100', 'opacity-100');
+                panel.classList.add('scale-95', 'opacity-0');
+                setTimeout(() => {
+                    panel.classList.add('hidden');
+                    if(settingsBtn) settingsBtn.classList.remove('hidden');
+                }, 300);
+            }
+        };
+
+        function renderSkins() {
+            const grid = document.getElementById('skinsGrid');
+            grid.innerHTML = ''; 
+
+            SKINS_DATA.forEach(skin => {
+                const isOwned = playerSkins.includes(skin.id);
+                const isEquipped = currentSkinId === skin.id;
+                const style = RARITY_STYLES[skin.rarity];
+                
+                const card = document.createElement('div');
+                card.className = `${style.bg} ${style.border} border-2 rounded-xl p-3 flex flex-col items-center cursor-pointer transition-all active:scale-95 relative overflow-hidden`;
+                card.onclick = () => openSkinModal(skin);
+
+                card.innerHTML = `
+                    <div class="h-20 w-20 flex items-center justify-center mb-2">
+                        <img src="${skin.img}" class="max-h-full object-contain" style="image-rendering: pixelated;">
+                    </div>
+                    <div class="text-white text-xs font-bold text-center">${skin.name}</div>
+                    <div class="mt-2 w-full text-center py-1 rounded bg-black/40 text-[10px] font-bold ${isEquipped ? 'text-green-400' : (isOwned ? 'text-blue-300' : 'text-yellow-400')}">
+                        ${isEquipped ? 'НАДЕТО' : (isOwned ? 'ВЛАДЕЕТЕ' : '💎 ' + skin.price)}
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        window.openSkinModal = function(skin) {
+            const modal = document.getElementById('skinModal');
+            const buyBtn = document.getElementById('buySkinBtn');
+            const isOwned = playerSkins.includes(skin.id);
+            const isEquipped = currentSkinId === skin.id;
+
+            document.getElementById('modalSkinName').textContent = skin.name;
+            document.getElementById('modalSkinImg').src = skin.img;
+            document.getElementById('modalSkinDesc').textContent = skin.desc;
+            document.getElementById('modalSkinPrice').textContent = skin.price;
+
+            // Логика кнопки в модалке
+            buyBtn.onclick = null;
+            if (isEquipped) {
+                buyBtn.innerText = "УЖЕ НАДЕТО";
+                buyBtn.className = "w-full bg-slate-700 text-white font-bold py-4 rounded-xl opacity-50";
+            } else if (isOwned) {
+                buyBtn.innerText = "НАДЕТЬ";
+                buyBtn.className = "w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl";
+                buyBtn.onclick = () => equipAction(skin.id);
+            } else {
+                buyBtn.innerText = `КУПИТЬ ЗА 💎 ${skin.price}`;
+                buyBtn.className = "w-full bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-4 rounded-xl";
+                buyBtn.onclick = () => buyAction(skin);
+            }
+
+            modal.classList.remove('hidden');
+        };
+
+        // ТЕХНИЧЕСКИЕ ФУНКЦИИ КЛИКА
+        function buyAction(skin) {
+            // Тут должна быть проверка твоего реального баланса TST из SaveSystem
+            if (window.gameState && window.gameState.tst >= skin.price) {
+                window.gameState.tst -= skin.price;
+                playerSkins.push(skin.id);
+                tg.HapticFeedback.notificationOccurred('success'); // Вибрация!
+                equipAction(skin.id);
+            } else {
+                tg.HapticFeedback.notificationOccurred('error');
+                alert("Недостаточно TST!");
+            }
+        }
+
+        function equipAction(skinId) {
+            currentSkinId = skinId;
+            tg.HapticFeedback.impactOccurred('medium'); // Легкий тук!
+            
+            // Если у тебя персонаж отрисовывается через переменную, обнови её здесь
+            // Например: player.image.src = SKINS_DATA.find(s => s.id === skinId).img;
+            
+            closeSkinModal();
+            renderSkins();
+            // Не забудь сохранить прогресс!
+            if(window.SaveSystem) window.SaveSystem.save();
+        }
+
+        window.closeSkinModal = () => document.getElementById('skinModal').classList.add('hidden');
+
+        // ==================== ОСНОВНОЙ РЕНДЕР ====================
+        function drawGrid() {
+            // 1. Рисуем сплошной пол (ромб всей карты)
+            const size = GameState.gridSize;
+            const ts = CONFIG.tileSize * camera.zoom;
+            
+            // Координаты углов карты
+            const top = toIso(0, 0);
+            const right = toIso(size, 0);
+            const bottom = toIso(size, size);
+            const left = toIso(0, size);
+
+            ctx.beginPath();
+            ctx.moveTo(top.x, top.y);
+            ctx.lineTo(right.x, right.y);
+            ctx.lineTo(bottom.x, bottom.y);
+            ctx.lineTo(left.x, left.y);
+            ctx.closePath();
+            
+            // Заливаем цветом пола
+            ctx.fillStyle = CONFIG.colors.floor;
+            ctx.fill();
+
+            // 2. Рисуем стены комнат
+            RoomSystem.drawWalls();
+
+            // 3. Рисуем сетку (едва заметные линии) только внутри комнат
+            ctx.strokeStyle = CONFIG.colors.gridStroke;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+
+            for (let i = 0; i <= size; i++) {
+                // Линии по X
+                let p1 = toIso(i, 0);
+                let p2 = toIso(i, size);
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+
+                // Линии по Y
+                let p3 = toIso(0, i);
+                let p4 = toIso(size, i);
+                ctx.moveTo(p3.x, p3.y);
+                ctx.lineTo(p4.x, p4.y);
+            }
+            ctx.stroke();
+        }
+
+        function drawObjects() {
+            // Баги
+            GameState.bugs.forEach(bug => {
+                const iso = toIso(bug.x, bug.y, 0.1);
+                ctx.save();
+                ctx.globalAlpha = 0.7;
+                ctx.fillStyle = bug.severity === 'critical' ? '#ef4444' : 
+                               bug.severity === 'medium' ? '#f59e0b' : '#6b7280';
+                ctx.beginPath();
+                ctx.arc(iso.x, iso.y, 8 * camera.zoom, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.font = 'bold 10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('🐛', iso.x, iso.y + 3);
+                ctx.restore();
+            });
+            
+            // Все объекты
+    const allObjects = [
+        ...GameState.objects.map(obj => ({...obj, type: 'object'})),
+        ...GameState.npcs.map(npc => ({...npc, type: 'npc'}))
+    ];
+    
+    allObjects.sort((a, b) => (a.x + a.y) - (b.x + b.y));
+    
+    allObjects.forEach(item => {
+        const iso = toIso(item.x, item.y);
+        
+        // Отрисовка тени
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.ellipse(iso.x, iso.y + CONFIG.tileSize * camera.zoom/2, 
+                   CONFIG.tileSize * camera.zoom/2.5, CONFIG.tileSize * camera.zoom/4, 0, 0, Math.PI*2);
+        ctx.fill();
+        
+        // Отрисовка самого объекта/NPC
+        const type = ITEM_TYPES[item.id];
+        if (type && Renderers[type.renderType]) {
+            Renderers[type.renderType](item, type);
+        }
+
+        // --- ДОБАВЛЯЕМ ТУТ: Отрисовка уровня предмета ---
+        if (item.level && item.level > 1) {
+            ctx.save();
+            ctx.font = `bold ${12 * camera.zoom}px Arial`;
+            ctx.textAlign = 'center';
+            
+            // Рисуем небольшую подложку под текст, чтобы его было видно на любом фоне
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            const text = `Lvl ${item.level}`;
+            const textWidth = ctx.measureText(text).width;
+            ctx.fillRect(iso.x - textWidth/2 - 2, iso.y - 45 * camera.zoom, textWidth + 4, 14 * camera.zoom);
+            
+            // Сам текст уровня (золотой цвет)
+            ctx.fillStyle = '#fbbf24'; 
+            ctx.fillText(text, iso.x, iso.y - 35 * camera.zoom);
+            ctx.restore();
+        }
+    });
+}
+
+        function render() {
+    // 1. Очистка экрана (твой стандартный код)
+    ctx.fillStyle = CONFIG.colors.background;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Отрисовка сетки
+    drawGrid();
+
+    // --- НОВОЕ: Отрисовка комнат и их статуса ---
+    RoomSystem.rooms.forEach(room => {
+        const p1 = toIso(room.x, room.y);
+        const p2 = toIso(room.x + room.width, room.y);
+        const p3 = toIso(room.x + room.width, room.y + room.height);
+        const p4 = toIso(room.x, room.y + room.height);
+
+        // Рисуем пол комнаты
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.lineTo(p3.x, p3.y);
+        ctx.lineTo(p4.x, p4.y);
+        ctx.closePath();
+        
+        // Цвет комнаты с прозрачностью
+        ctx.fillStyle = room.color + '22'; // 22 - это прозрачность в HEX
+        ctx.fill();
+        ctx.strokeStyle = room.color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Если комната заблокирована, рисуем "туман" и замок
+        if (room.isLocked) {
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.7)'; // Темный слой
+            ctx.fill();
+            
+            const center = toIso(room.x + room.width/2, room.y + room.height/2);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText("🔒 ЗАБЛОКИРОВАНО", center.x, center.y);
+            ctx.font = '10px Arial';
+            ctx.fillText(`Купить: $${GameState.roomPrices[room.id]}`, center.x, center.y + 20);
+        }
+    });
+    // --- КОНЕЦ НОВОГО БЛОКА ---
+
+    // 3. Твоя стандартная логика отрисовки
+    if (PlacementSystem.isPlacing) {
+        PlacementSystem.renderPreview();
+    }
+    
+    drawObjects();
+    drawParticles();
+    
+    FloatingTextSystem.updateAndDraw(ctx); // Рисуем всплывающий текст "+$50"
+    // Запускаем следующий кадр
+    requestAnimationFrame(render);
+}
+
+        // ==================== УТИЛИТЫ ====================
+        function shadeColor(color, percent) {
+            let R = parseInt(color.substring(1,3),16);
+            let G = parseInt(color.substring(3,5),16);
+            let B = parseInt(color.substring(5,7),16);
+
+            R = parseInt(R * (100 + percent) / 100);
+            G = parseInt(G * (100 + percent) / 100);
+            B = parseInt(B * (100 + percent) / 100);
+
+            R = (R<255)?R:255;  G = (G<255)?G:255;  B = (B<255)?B:255;  
+            if (R < 0) R = 0; if (G < 0) G = 0; if (B < 0) B = 0;
+
+            const RR = ((R.toString(16).length==1)?"0"+R.toString(16):R.toString(16));
+            const GG = ((G.toString(16).length==1)?"0"+G.toString(16):G.toString(16));
+            const BB = ((B.toString(16).length==1)?"0"+B.toString(16):B.toString(16));
+
+            return "#"+RR+GG+BB;
+        }
+
+        function spawnFloatingText(text, x, y, color = '#4ade80') {
+            const el = document.createElement('div');
+            el.className = 'floating-text';
+            el.textContent = text;
+            el.style.color = color;
+            el.style.left = (x - 20) + 'px';
+            el.style.top = (y - 50) + 'px';
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 800);
+        }
+
+        function showNotification(text, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `quest-notification ${type}`;
+            
+            let icon = 'ℹ️';
+            if (type === 'success') icon = '✅';
+            else if (type === 'error') icon = '❌';
+            else if (type === 'quest') icon = '🎯';
+            
+            notification.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="text-lg">${icon}</span>
+                    <span class="text-white text-sm font-medium flex-1">${text}</span>
+                </div>
+            `;
+            
+            const container = document.getElementById('notification-center');
+            container.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        window.updateTechDebtUI = function() {
+            const techDebtBar = document.getElementById('tech-debt-bar');
+            const techDebtFill = document.getElementById('tech-debt-fill');
+            const debtValue = document.getElementById('debt-value');
+            
+            if (!techDebtBar) return;
+            
+            const techDebtValue = GameState.techDebt || 0;
+            
+            // Всегда показываем панель
+            techDebtBar.classList.remove('hidden');
+            
+            if (techDebtFill) techDebtFill.style.width = `${techDebtValue}%`;
+            
+            if (debtValue) {
+                debtValue.textContent = Math.floor(techDebtValue) + '%';
+                // Меняем цвет текста процентов
+                debtValue.className = techDebtValue > 70 ? 'text-red-400' : 
+                                      techDebtValue > 40 ? 'text-yellow-400' : 'text-green-400';
+            }
+            
+            // Обновляем цвет самой полоски
+            if (techDebtFill) {
+                if (techDebtValue > 70) {
+                    techDebtFill.className = 'h-full bg-gradient-to-r from-yellow-500 to-red-600 transition-all duration-500';
+                } else if (techDebtValue > 40) {
+                    techDebtFill.className = 'h-full bg-gradient-to-r from-green-500 to-yellow-500 transition-all duration-500';
+                } else {
+                    techDebtFill.className = 'h-full bg-gradient-to-r from-green-500 to-green-600 transition-all duration-500';
+                }
+            }
+        };
+
+
+        // ==================== UI ОБНОВЛЕНИЯ ====================
+function updateUI() {
+    // 1. Обновляем основные показатели (новые ID)
+    const moneyEl = document.getElementById('ui-money');
+    if (moneyEl) moneyEl.textContent = `$${Math.floor(GameState.tsp).toLocaleString()}`;
+
+    const incomeEl = document.getElementById('ui-income');
+    if (incomeEl) {
+        // Учитываем множитель дохода от событий
+        const currentIncome = GameState.autoClicker * (GameState.incomeMultiplier || 1);
+        incomeEl.textContent = `+${currentIncome.toFixed(1)}/сек`;
+    }
+
+    const tstEl = document.getElementById('ui-tst');
+    if (tstEl) tstEl.textContent = Math.floor(GameState.tst || 0);
+
+    // 2. Проверка уровня (можно оставить скрытым или добавить в HUD)
+    const newLevel = Math.floor((GameState.xp || 0) / 1000) + 1;
+    if (newLevel > GameState.level) {
+        GameState.level = newLevel;
+        showNotification(`🎉 Новый уровень: ${GameState.level}!`, 'success');
+    }
+
+    // 3. Вызов обновлений вложенных систем
+    updateQuestUI(); 
+    updateTechDebtUI(); // Раскомментируй, если решишь добавить полоску техдолга в HUD
+}
+
+function updateQuestUI() {
+    const container = document.getElementById('hud-quests');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Берем активные квесты (максимум 3 для HUD)
+    // ВАЖНО: Убедись, что QuestSystem.activeQuests — это массив активных заданий
+    const activeQuests = QuestSystem.activeQuests || [];
+    const displayQuests = activeQuests.slice(0, 3);
+    
+    displayQuests.forEach(quest => {
+        const progressPercent = (quest.progress.current / quest.progress.total) * 100;
+        const isReady = quest.progress.current >= quest.progress.total;
+        
+        const questEl = document.createElement('div');
+        // Делаем квест кликабельным, если он готов к сдаче
+        questEl.className = `w-full bg-slate-900/90 backdrop-blur rounded-lg p-2 border ${isReady ? 'border-green-500 cursor-pointer animate-pulse pointer-events-auto' : 'border-slate-700/50'} shadow-md transition-all`;
+        
+        if (isReady) {
+            questEl.onclick = () => {
+                QuestSystem.completeQuest(quest.id);
+                showNotification('Задание выполнено!', 'success');
+            };
+        }
+
+        questEl.innerHTML = `
+            <div class="flex justify-between items-center mb-1 gap-2">
+                <span class="text-[10px] font-bold ${isReady ? 'text-green-400' : 'text-slate-200'} truncate">${quest.title}</span>
+                <span class="text-[10px] text-amber-400 font-bold whitespace-nowrap">+$${quest.reward.money}</span>
+            </div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden border border-slate-700/30">
+                <div class="bg-blue-500 h-full transition-all duration-500" style="width: ${progressPercent}%"></div>
+            </div>
+        `;
+        container.appendChild(questEl);
+    });
+}
+
+        // ==================== УПРАВЛЕНИЕ ПАНЕЛЯМИ ====================
+function togglePanel(panelId) {
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+    
+    const settingsBtn = document.getElementById('settingsBtn');
+    const isVisible = !panel.classList.contains('hidden');
+    
+    // Закрываем вообще все существующие панели на экране
+    ['shop-panel', 'skins-panel', 'event-panel', 'quest-panel', 'mobile-menu'].forEach(id => {
+        const p = document.getElementById(id);
+        if (p) p.classList.add('hidden');
+    });
+    
+    if (!isVisible) {
+        // ОТКРЫВАЕМ панель
+        panel.classList.remove('hidden');
+        
+        // Скрываем кнопку настроек
+        if (settingsBtn) settingsBtn.classList.add('hidden');
+        
+        // Специфичная логика для разных панелей
+        if (panelId === 'shop-panel') {
+            populateShop();
+        } else if (panelId === 'quest-panel' && typeof updateQuestUI === 'function') {
+            updateQuestUI();
+        }
+    } else {
+        // ЗАКРЫВАЕМ панель
+        // Показываем кнопку настроек обратно
+        if (settingsBtn) settingsBtn.classList.remove('hidden');
+    }
+}
+
+        // ==================== УПРАВЛЕНИЕ МАГАЗИНОМ ====================
+        let currentShopCategory = 'equipment'; // Какая вкладка сейчас открыта
+
+        window.openShop = function(category) {
+            currentShopCategory = category;
+            
+            // Меняем заголовок окна в зависимости от того, на что нажали
+            const titleEl = document.getElementById('shop-title');
+            if (titleEl) {
+                titleEl.textContent = category === 'staff' ? '👥 Найм Персонала' : '🔨 Оборудование и Комнаты';
+            }
+            
+            togglePanel('shop-panel');
+        };
+
+        // ==================== КРИПТО-МАГАЗИН TST ====================
+        
+        // ВАЖНО: Замени на свой реальный адрес Vercel без слеша на конце!
+        const VERCEL_API_URL = "https://project-ma0qy.vercel.app"; 
+
+        window.toggleTstShop = function(show) {
+            const panel = document.getElementById('tst-shop-panel');
+            if (!panel) return;
+            
+            if (show) {
+                panel.classList.remove('hidden');
+                setTimeout(() => panel.classList.add('opacity-100'), 10);
+            } else {
+                panel.classList.add('hidden');
+            }
+        };
+
+        // Инициализация TON Connect
+        const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+            // ИЗМЕНИЛИ ССЫЛКУ СЮДА 👇
+            manifestUrl: 'https://project-ma0qy.vercel.app/api/manifest'
+        });
+
+        // ==================== ЛОГИКА ОПЛАТЫ (TON CONNECT) ====================
+        window.initiateCryptoPayment = async function(packageId) {
+            try {
+                // Если кошелек еще не подключен, просим подключить
+                if (!tonConnectUI.connected) {
+                    await tonConnectUI.openModal();
+                    return; // Ждем, пока юзер подключится
+                }
+
+                const playerId = SaveSystem.getPlayerId(); 
+                
+                // 1. Создаем заказ на нашем сервере (чтобы получить orderId)
+                console.log("⏳ Создаем заказ на сервере...");
+                const response = await fetch('https://project-ma0qy.vercel.app/api/createInvoice', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playerId, packageId })
+                });
+                
+                if (!response.ok) throw new Error("Ошибка создания заказа");
+                const { orderId } = await response.json();
+                
+                // Цены пакетов для фронтенда
+                const prices = { "pack_50": 0.5, "pack_250": 2.0, "pack_1000": 5.0 };
+                const nanoTonAmount = (prices[packageId] * 1000000000).toString();
+
+                // 2. Упаковываем комментарий (orderId) в формат блокчейна
+                const tonweb = new window.TonWeb();
+                const cell = new tonweb.boc.Cell();
+                cell.bits.writeUint(0, 32); // Код 0 означает "это текстовый комментарий"
+                cell.bits.writeString(orderId);
+                const payloadBoc = tonweb.utils.bytesToBase64(await cell.toBoc());
+
+                // 3. Формируем транзакцию для кошелька
+                const transaction = {
+                    validUntil: Math.floor(Date.now() / 1000) + 360, // Время на оплату: 6 минут
+                    messages: [
+                        {
+                            address: "UQDoIPCk2ApooFyCoBGVlUIKr04Q2DOHg07O3eXytYvuFOv_", // <-- ТВОЙ КОШЕЛЕК
+                            amount: nanoTonAmount,
+                            payload: payloadBoc // Вшитый номер заказа
+                        }
+                    ]
+                };
+                
+                // 4. Отправляем запрос в кошелек (Откроется всплывающее окно)
+                console.log("Открываем кошелек для подтверждения...");
+                await tonConnectUI.sendTransaction(transaction);
+                
+                // 5. Если код дошел сюда, значит юзер нажал "Подтвердить" в кошельке!
+                // Теперь запускаем нашу серверную ищейку проверять блокчейн
+                startPaymentPolling(orderId); 
+                
+            } catch (error) {
+                console.error("❌ Ошибка платежа:", error);
+                // Проверяем, не закрыл ли юзер окно оплаты сам
+                if (error.message && error.message.includes("reject")) {
+                    alert("Оплата отменена.");
+                } else {
+                    alert("Не удалось запустить оплату. Попробуйте позже.");
+                }
+            }
+        };
+
+        // ТВОЯ ФУНКЦИЯ startPaymentPolling ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ!
+
+        // Невидимая функция, которая стучится на сервер каждые 5 секунд
+        function startPaymentPolling(orderId) {
+            console.log(`🔍 Начинаем ожидание оплаты для заказа: ${orderId}...`);
+            
+            // Можешь заменить этот alert на красивую плашку в UI твоей игры
+            alert("Ожидаем оплату... Пожалуйста, не закрывайте игру.");
+
+            let attempts = 0;
+            const maxAttempts = 60; // 60 попыток по 5 секунд = 5 минут ожидания
+            
+            const pollInterval = setInterval(async () => {
+                attempts++;
+                
+                // Если прошло 5 минут, а оплаты нет — сдаемся
+                if (attempts > maxAttempts) {
+                    clearInterval(pollInterval);
+                    console.log("⏰ Время ожидания оплаты вышло.");
+                    alert("Время ожидания вышло. Если вы оплатили, кристаллы зачислятся при следующем входе.");
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('https://project-ma0qy.vercel.app/api/checkPayment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ orderId })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.status === "paid") {
+                        // ОПЛАТА НАЙДЕНА!
+                        clearInterval(pollInterval);
+                        console.log("✅ Оплата успешно найдена в блокчейне!");
+                        
+                        alert("Успешно! Кристаллы TST начислены!");
+                        
+                        // Перезагружаем страницу, чтобы подтянуть новые данные из Firebase
+                        // Или можешь вызвать свою функцию обновления баланса, если она есть
+                        window.location.reload(); 
+                    } else {
+                        console.log(`[Попытка ${attempts}/${maxAttempts}] Платеж пока не найден... Ждем.`);
+                    }
+                } catch (error) {
+                    console.error("⚠️ Ошибка при проверке платежа:", error);
+                    // Ошибки сети игнорируем, просто попробуем еще раз через 5 сек
+                }
+            }, 5000); // 5000 мс = 5 секунд
+        }
+
+        // ==================== НАСТРОЙКИ И КОШЕЛЕК ====================
+        
+        // Открытие/закрытие панели настроек
+        window.toggleSettings = function() {
+            const panel = document.getElementById('settingsPanel');
+            panel.classList.toggle('hidden');
+        };
+
+        // Логика нажатия на кнопку "Привязать/Отвязать"
+        window.toggleWalletConnection = async function() {
+            if (tonConnectUI.connected) {
+                await tonConnectUI.disconnect();
+            } else {
+                // Если кошелек не подключен, прячем настройки и вызываем окно TON Connect
+                toggleSettings(); 
+                await tonConnectUI.openModal();
+            }
+        };
+
+        // МАГИЯ: Автоматически отслеживаем статус кошелька
+        tonConnectUI.onStatusChange(async (walletInfo) => {
+            const btn = document.getElementById('walletToggleBtn');
+            const playerId = SaveSystem.getPlayerId();
+
+            if (walletInfo) {
+                // 1. КОШЕЛЕК ПОДКЛЮЧЕН
+                const rawAddress = walletInfo.account.address;
+                
+                // Делаем красивый короткий адрес, например 0QAx...1234
+                const shortAddress = `${rawAddress.slice(0, 4)}...${rawAddress.slice(-4)}`;
+                
+                // Меняем дизайн кнопки на красный (чтобы отвязать)
+                btn.textContent = `Отвязать (${shortAddress})`;
+                btn.className = "w-full bg-red-600 hover:bg-red-500 text-white font-semibold py-2 px-4 rounded transition duration-200";
+
+                // Сохраняем адрес в профиль игрока в Firebase
+                try {
+                    await db.collection("players").doc(playerId).set({ 
+                        tonWallet: rawAddress 
+                    }, { merge: true }); // merge: true обновляет только нужное поле, не затирая остальной прогресс
+                    console.log("✅ Кошелек сохранен в БД:", rawAddress);
+                } catch (e) {
+                    console.error("Ошибка сохранения кошелька в БД", e);
+                }
+
+            } else {
+                // 2. КОШЕЛЕК ОТКЛЮЧЕН
+                // Возвращаем синий дизайн кнопки
+                btn.textContent = "Привязать кошелек";
+                btn.className = "w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded transition duration-200";
+
+                // Удаляем адрес из Firebase (или ставим null)
+                try {
+                    await db.collection("players").doc(playerId).set({ 
+                        tonWallet: null 
+                    }, { merge: true });
+                    console.log("❌ Кошелек отвязан и удален из БД");
+                } catch (e) {
+                    console.error("Ошибка удаления кошелька из БД", e);
+                }
+            }
+        });
+
+        function populateShop() {
+            const shopItemsDiv = document.getElementById('shop-items');
+            if (!shopItemsDiv) return;
+            shopItemsDiv.innerHTML = '';
+            
+            // ===== 1. ПРЕДМЕТЫ И ПЕРСОНАЛ =====
+            Object.values(ITEM_TYPES).forEach(item => {
+                if (typeof UNLOCKED_ITEMS !== 'undefined' && !UNLOCKED_ITEMS[item.id]) return;
+                
+                // ЛОГИКА ФИЛЬТРАЦИИ:
+                // Если открыли Персонал, показываем только 'employee'. Иначе показываем всё остальное.
+                const isEmployee = item.type === 'employee';
+                if (currentShopCategory === 'staff' && !isEmployee) return;
+                if (currentShopCategory === 'equipment' && isEmployee) return;
+
+                const room = RoomSystem.getRoomForItem(item.id);
+                const isRoomLocked = room && room.isLocked;
+                
+                if (isRoomLocked) return;
+                
+                const currentCount = [...GameState.objects, ...GameState.npcs].filter(o => o.id === item.id).length;
+                const limit = GameState.limits[item.id] || 99;
+                const isLimitReached = currentCount >= limit;
+                
+                const stats = getCurrentItemStats(item.id);
+                const canAfford = GameState.tsp >= stats.cost;
+                
+                const roomName = room ? room.name : 'Любая комната';
+                const roomColor = room ? room.color : '#374151';
+                const itemEmoji = getItemEmoji(item.id);
+
+                const itemEl = document.createElement('div');
+                itemEl.className = `w-full bg-slate-800 rounded-xl p-4 transition-all duration-200 border border-slate-700 mb-2`;
+                
+                itemEl.innerHTML = `
+                    <div class="flex items-center gap-3 mb-2">
+                        <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl" style="background: ${roomColor}">
+                            ${itemEmoji}
+                        </div>
+                        <div class="flex-1">
+                            <div class="flex justify-between">
+                                <div class="font-bold text-white">${item.name}</div>
+                                <div class="text-xs font-mono ${isLimitReached ? 'text-red-400' : 'text-green-400'}">
+                                    ${currentCount}/${limit}
+                                </div>
+                            </div>
+                            <div class="text-slate-300 text-[11px] leading-tight mt-1">${item.desc || ''}</div>
+                            
+                            ${stats.income > 0 ? `<div class="text-xs text-green-400 font-bold mt-1">Доход: +${stats.income}/сек</div>` : ''}
+                            
+                            <div class="text-[10px] text-blue-300 mt-1 flex items-center gap-1">
+                                <span>📍</span> ${roomName}
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="font-bold text-lg text-amber-400">$${stats.cost}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <button onclick="tryBuyItem('${item.id}')" 
+                            ${(!canAfford || isLimitReached) ? 'disabled' : ''} 
+                            class="w-full py-2 ${(!canAfford || isLimitReached) ? 'bg-slate-700 opacity-50 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'} 
+                            text-white text-xs rounded-lg font-bold transition-colors">
+                            ${isLimitReached ? 'ДОСТИГНУТ ЛИМИТ' : canAfford ? 'КУПИТЬ' : 'НЕДОСТАТОЧНО СРЕДСТВ'}
+                        </button>
+                    </div>
+                `;
+                
+                shopItemsDiv.appendChild(itemEl);
+            });
+            
+            // ===== 2. КОМНАТЫ (Показываем только во вкладке Оборудование) =====
+            if (currentShopCategory === 'equipment') {
+                RoomSystem.rooms.forEach(room => {
+                    if (room.id === 'dev_room') return;
+                    
+                    const price = GameState.roomPrices[room.id];
+                    const canAfford = GameState.tsp >= price;
+                    const roomEmoji = getRoomEmoji(room.id);
+                    
+                    const roomEl = document.createElement('div');
+                    roomEl.className = `w-full bg-slate-800 rounded-xl p-4 transition-all duration-200 border border-purple-700 mb-2`;
+                    
+                    roomEl.innerHTML = `
+                        <div class="flex items-center gap-3 mb-2">
+                            <div class="w-10 h-10 rounded-lg flex items-center justify-center text-xl" style="background: ${room.color}">
+                                ${roomEmoji}
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex justify-between items-center">
+                                    <div class="font-bold text-white">${room.name}</div>
+                                    <div class="text-[10px] px-1.5 py-0.5 rounded ${room.isLocked ? 'bg-red-500' : 'bg-green-500'} text-white font-bold">
+                                        ${room.isLocked ? 'ЗАКРЫТА' : 'ОТКРЫТА'}
+                                    </div>
+                                </div>
+                                <div class="text-[10px] text-blue-300 mt-1">
+                                    📍 Размер: ${room.width}×${room.height}
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold text-lg text-amber-400">$${price}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <button onclick="buyRoom('${room.id}')" 
+                                ${room.isLocked ? '' : 'disabled'}
+                                class="w-full py-2 ${room.isLocked ? (canAfford ? 'bg-purple-600 hover:bg-purple-500' : 'bg-slate-700 opacity-50 cursor-not-allowed') : 'bg-green-600 cursor-default'} 
+                                text-white text-xs rounded-lg font-bold transition-colors">
+                                ${room.isLocked ? 
+                                    (canAfford ? 'КУПИТЬ КОМНАТУ' : 'НЕДОСТАТОЧНО СРЕДСТВ') : 
+                                    '✅ КОМНАТА ОТКРЫТА'}
+                            </button>
+                        </div>
+                    `;
+                    
+                    shopItemsDiv.appendChild(roomEl);
+                });
+            }
+        }
+
+        function getItemEmoji(itemId) {
+            const emojiMap = {
+                workstation_basic: '💻',
+                server_rack: '🖥️',
+                plant: '🪴',
+                employee_dev: '👨‍💻',
+                employee_manager: '👨‍💼',
+                coffee_machine: '☕',
+                whiteboard: '📋'
+            };
+            return emojiMap[itemId] || '📦';
+        }
+
+        // ==================== ОСНОВНОЙ ЦИКЛ ИГРЫ ====================
+        let lastTime = 0;
+        function gameLoop(timestamp) {
+            const delta = Math.min((timestamp - lastTime) / 1000, 0.1);
+            lastTime = timestamp;
+            
+            // ==== ЛОГИКА ПАДЕНИЯ СЕРВЕРА ====
+        if (!GameState.isServerDown) {
+            // Сервер падает ТОЛЬКО при техдолге 100%
+            if (GameState.techDebt >= 100) {
+                // Шанс падения: 2% каждый кадр при техдолге 100%
+                const crashChance = 0.02;
+                if (Math.random() < crashChance) {
+                    GameState.isServerDown = true;
+                    GameState.serverCrashTime = Date.now();
+                    
+                    // Визуальный эффект падения сервера
+                    const server = GameState.objects.find(o => o.id === 'server_rack');
+                    if (server) {
+                        createBugEffect(server.x, server.y, 'critical');
+                    }
+                    
+                    showNotification("🚨 КРИТИЧЕСКАЯ ОШИБКА: Сервер упал! Доход остановлен!", "error");
+                    
+                    // Ищем Team Lead для починки
+                    const fixer = GameState.npcs.find(n => n.id === 'employee_manager');
+                    if (fixer) {
+                        fixer.state = 'fixing_server';
+                        if (server) {
+                            fixer.targetX = server.x + 0.5;
+                            fixer.targetY = server.y + 0.5;
+                            showNotification(`👨‍💼 ${fixer.name} направляется чинить сервер...`, 'info');
+                        }
+                    } else {
+                        showNotification("Нет Team Lead для починки сервера! Нанять employee_manager", 'warning');
+                    }
+                }
+            }
+        } else {
+            // Логика починки сервера...
+            const fixer = GameState.npcs.find(n => n.state === 'fixing_server');
+            if (fixer) {
+                const server = GameState.objects.find(o => o.id === 'server_rack');
+                if (server) {
+                    const dist = Math.sqrt(
+                        Math.pow(fixer.x - (server.x + 0.5), 2) + 
+                        Math.pow(fixer.y - (server.y + 0.5), 2)
+                    );
+                    
+                    if (dist < 0.5) {
+                        // Сервер чинится за 10 секунд
+                        const fixTime = 10000;
+                        if (Date.now() - GameState.serverCrashTime > fixTime) {
+                            GameState.isServerDown = false;
+                            GameState.techDebt = 0; // Сброс техдолга после починки
+                            fixer.state = 'idle';
+                            showNotification("✅ Сервер восстановлен! Доход возобновлен.", 'success');
+                        }
+                    }
+                }
+            }
+        }
+            
+            // ==== РАСЧЕТ ДОХОДА ====
+            // Теперь доход умножается на глобальный множитель (по умолчанию 1)
+            let currentIncome = GameState.autoClicker * (GameState.incomeMultiplier || 1);
+            if (GameState.isServerDown) {
+                currentIncome = 0; // Доход остановлен при падении сервера
+            }
+            
+            GameState.tsp += currentIncome * delta;
+            updateUI();
+            
+            // ==== ГЕНЕРАЦИЯ БАГОВ ====
+            if (Math.random() < delta * 0.5) {
+                generateBug();
+            }
+            
+            updateNPCs();
+            updateParticles();
+            checkLevelUp();
+            updateTeamLeads();
+            
+            // ==== СЛУЧАЙНЫЕ СОБЫТИЯ ====
+            if (!GameState.lastEventTime) GameState.lastEventTime = timestamp;
+            
+            // Раз в 2 минуты (120000 мс) есть шанс на событие
+            if (timestamp - GameState.lastEventTime > 120000) {
+                GameState.lastEventTime = timestamp;
+                
+                // 50% шанс, что событие произойдет, и только если у нас есть хотя бы 1 сотрудник или сервер (чтобы не душить на старте)
+                if (Math.random() < 0.5 && GameState.objects.length > 1) { 
+                    RandomEventsSystem.triggerRandom();
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+       // --- НОВЫЕ СИСТЕМЫ (УРОВНИ, ТИМЛИД, ТЕКСТ) ---
+
+// 1. СИСТЕМА ЛИМИТОВ
+function updateLimits() {
+    const level = GameState.companyLevel || 1;
+    // Базовые лимиты + прирост за уровень
+    GameState.limits = {
+        workstation_basic: 2 + (level * 2),
+        employee_dev: 2 + (level * 2),
+        server_rack: 1 + Math.floor(level * 1.5),
+        coffee_machine: 1 + Math.floor(level / 2),
+        plant: 2 + level,
+        whiteboard: 1 + Math.floor(level / 3),
+        employee_manager: 1 + Math.floor(level / 5)
+    };
+    if (document.getElementById('shop-panel').classList.contains('hidden') === false) {
+        populateShop();
+    }
+}
+
+// 2. ПРОВЕРКА УРОВНЯ
+function checkLevelUp() {
+    const xpNeeded = 1000 * (GameState.companyLevel || 1) * 1.5;
+    if (GameState.xp >= xpNeeded) {
+        GameState.companyLevel = (GameState.companyLevel || 1) + 1;
+        GameState.xp -= xpNeeded;
+        showNotification(`🎉 УРОВЕНЬ ПОВЫШЕН! Теперь уровень ${GameState.companyLevel}`, 'success');
+        updateLimits(); 
+        updateUI();
+    }
+}
+
+// 3. AI ДЛЯ TEAM LEAD (сбор багов и починка)
+function updateTeamLeads() {
+    const managers = GameState.npcs.filter(npc => npc.id === 'employee_manager');
+    managers.forEach(manager => {
+        const speed = 2 * (manager.speed || 1);
+
+        // Ищем ближайший баг
+        if (GameState.bugs.length > 0) {
+            let nearestBug = null;
+            let minDist = Infinity;
+            GameState.bugs.forEach(bug => {
+                const d = Math.hypot(bug.x - manager.x, bug.y - manager.y);
+                if (d < minDist) { minDist = d; nearestBug = bug; }
+            });
+
+            if (nearestBug) {
+                const dx = nearestBug.x - manager.x;
+                const dy = nearestBug.y - manager.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 5) {
+                    manager.x += (dx / dist) * speed;
+                    manager.y += (dy / dist) * speed;
+                    manager.state = 'moving';
+                } else {
+                    const bugIndex = GameState.bugs.indexOf(nearestBug);
+                    if (bugIndex > -1) {
+                        GameState.bugs.splice(bugIndex, 1);
+                        GameState.tsp += 50;
+                        FloatingTextSystem.add(manager.x, manager.y - 40, `FIXED! +$50`, '#10b981');
+                        // showNotification("Team Lead исправил баг!", "success");
+                    }
+                }
+                return;
+            }
+        }
+        
+        // Если багов нет — проверяем серверы
+        if (!manager.targetServer) {
+            const servers = GameState.objects.filter(o => o.id === 'server_rack');
+            if (servers.length > 0) manager.targetServer = servers[Math.floor(Math.random() * servers.length)];
+        }
+        if (manager.targetServer) {
+            const tx = manager.targetServer.x, ty = manager.targetServer.y;
+            const dist = Math.hypot(tx - manager.x, ty - manager.y);
+            if (dist > 40) {
+                manager.x += ((tx - manager.x) / dist) * speed * 0.5;
+                manager.y += ((ty - manager.y) / dist) * speed * 0.5;
+                manager.state = 'moving';
+            } else {
+                manager.state = 'idle';
+                if (Math.random() < 0.01) manager.targetServer = null;
+            }
+        }
+    });
+}
+
+// 4. СИСТЕМА ВСПЛЫВАЮЩЕГО ТЕКСТА
+const FloatingTextSystem = {
+    texts: [],
+    add(x, y, text, color) {
+        this.texts.push({ x, y, text, color, life: 60, dy: 0 });
+    },
+    updateAndDraw(ctx) {
+        for (let i = this.texts.length - 1; i >= 0; i--) {
+            const t = this.texts[i];
+            t.life--; t.dy -= 0.5;
+            if (t.life <= 0) { this.texts.splice(i, 1); continue; }
+            const iso = toIso(t.x, t.y);
+            ctx.save();
+            ctx.fillStyle = t.color;
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.globalAlpha = t.life / 30;
+            ctx.fillText(t.text, iso.x, iso.y + t.dy - 50);
+            ctx.restore();
+        }
+    }
+};
+
+        // ==================== СИСТЕМА СЛУЧАЙНЫХ СОБЫТИЙ ====================
+        let eventTimeout = null; // Вынесли из объекта!
+
+        const RandomEventsSystem = {
+            events: [
+                {
+                    id: 'investor',
+                    icon: '💼',
+                    title: 'Сомнительный инвестор',
+                    desc: 'Местный крипто-энтузиаст предлагает $10,000 на развитие, но ваши сотрудники будут отвлекаться на его идеи (доход упадет на 50% на 1 минуту).',
+                    choices: [
+                        {
+                            text: 'Взять деньги (+$10k, Доход -50%)',
+                            color: 'bg-emerald-600 hover:bg-emerald-500',
+                            action: () => {
+                                GameState.tsp += 10000;
+                                GameState.incomeMultiplier = 0.5;
+                                showNotification('Вы взяли деньги инвестора!', 'warning');
+                                setTimeout(() => {
+                                    GameState.incomeMultiplier = 1;
+                                    showNotification('Инвестор ушел. Доход восстановлен!', 'success');
+                                }, 60000);
+                            }
+                        },
+                        {
+                            text: 'Отказаться (Ничего не произойдет)',
+                            color: 'bg-slate-700 hover:bg-slate-600',
+                            action: () => showNotification('Вы вежливо прогнали инвестора.', 'info')
+                        }
+                    ]
+                },
+                {
+                    id: 'pizza_day',
+                    icon: '🍕',
+                    title: 'Пицца-день',
+                    desc: 'Команда устала и пишет код с ошибками. Закажем пиццу для поднятия боевого духа?',
+                    choices: [
+                        {
+                            text: 'Заказать ($-500, Усталость на 0)',
+                            color: 'bg-blue-600 hover:bg-blue-500',
+                            action: () => {
+                                if (GameState.tsp >= 500) {
+                                    GameState.tsp -= 500;
+                                    GameState.npcs.forEach(npc => npc.fatigue = 0);
+                                    showNotification('Команда счастлива! Усталость сброшена.', 'success');
+                                } else {
+                                    showNotification('Не хватает денег на пиццу... Позор!', 'error');
+                                }
+                            }
+                        },
+                        {
+                            text: 'Обойдутся (Техдолг +15%)',
+                            color: 'bg-red-600 hover:bg-red-500',
+                            action: () => {
+                                GameState.techDebt = Math.min(100, GameState.techDebt + 15);
+                                updateTechDebtUI();
+                                showNotification('Команда недовольна. Код пишется с багами.', 'warning');
+                            }
+                        }
+                    ]
+                },
+                {
+                    id: 'viral_trend',
+                    icon: '📈',
+                    title: 'Вирусный тренд',
+                    desc: 'Ваш проект упомянули популярные блогеры! Сервера кипят, но трафик летит в космос!',
+                    choices: [
+                        {
+                            text: 'Супер! (Доход х2 на 30 секунд)',
+                            color: 'bg-purple-600 hover:bg-purple-500',
+                            action: () => {
+                                GameState.incomeMultiplier = 2;
+                                setTimeout(() => {
+                                    GameState.incomeMultiplier = 1;
+                                    showNotification('Хайп прошел. Трафик пришел в норму.', 'info');
+                                }, 30000);
+                            }
+                        }
+                    ]
+                }
+            ],
+            
+            triggerRandom() {
+                const event = this.events[Math.floor(Math.random() * this.events.length)];
+                
+                const miniBtn = document.getElementById('mini-event-btn');
+                const miniIcon = document.getElementById('mini-event-icon');
+                
+                miniIcon.textContent = event.icon;
+                miniBtn.classList.remove('hidden');
+                
+                miniBtn.onclick = () => {
+                    clearTimeout(eventTimeout);
+                    miniBtn.classList.add('hidden');
+                    this.showEvent(event);
+                };
+
+                clearTimeout(eventTimeout);
+                eventTimeout = setTimeout(() => {
+                    miniBtn.classList.add('hidden');
+                }, 10000);
+            },
+
+            showEvent(event) {
+                document.getElementById('event-icon').textContent = event.icon;
+                document.getElementById('event-title').textContent = event.title;
+                document.getElementById('event-desc').textContent = event.desc;
+                
+                const choicesDiv = document.getElementById('event-choices');
+                choicesDiv.innerHTML = '';
+                
+                event.choices.forEach(choice => {
+                    const btn = document.createElement('button');
+                    btn.className = `w-full py-4 ${choice.color} border border-slate-900 shadow-lg text-white font-bold rounded-xl text-lg sm:text-base transition-transform active:scale-95`;
+                    btn.textContent = choice.text;
+                    btn.onclick = () => {
+                        choice.action();
+                        document.getElementById('event-panel').classList.add('hidden');
+                        updateUI();
+                    };
+                    choicesDiv.appendChild(btn);
+                });
+                
+                document.getElementById('event-panel').classList.remove('hidden');
+            }
+        };
+
+        // ==================== ИНИЦИАЛИЗАЦИЯ ====================
+        function init() {
+            resize();
+            initSprites();
+            updateLimits()
+            
+            // Инициализация UI
+            GameUI.init();
+            
+            // Загрузка сохранения
+            SaveSystem.load();
+            
+            GameState.objects = GameState.objects.filter(obj => {
+                const itemType = ITEM_TYPES[obj.id];
+                if (itemType && itemType.renderType === 'npc') {
+                    // This is a worker stuck in the furniture list! Move them.
+                    obj.state = obj.state || 'idle';
+                    obj.targetX = obj.x;
+                    obj.targetY = obj.y;
+                    obj.speed = itemType.speed || 0.02;
+                    GameState.npcs.push(obj);
+                    return false; // Remove from objects
+                }
+                return true; // Keep in objects
+            });
+            
+            // Стартовые задания
+            if (QuestSystem.completedQuests.length === 0) {
+                setTimeout(() => {
+                    QuestSystem.startQuest('intro');
+                }, 1000);
+            }
+            
+            // Обновляем UI
+            updateUI();
+            updateTechDebtUI();
+            populateShop();
+            updateQuestUI();
+            
+            // Запускаем игровой цикл
+            requestAnimationFrame(gameLoop);
+            
+            // Начинаем рендер
+            render();
+            
+            // Автосохранение каждые 30 секунд
+            setInterval(() => {
+                SaveSystem.save();
+            }, 30000);
+            
+            // Тестовое сообщение
+            setTimeout(() => {
+                // showNotification('Игра загружена! Техдолг: ' + GameState.techDebt + '%', 'info');
+                // showNotification('🏢 Офис с комнатами готов к работе!', 'success');
+            }, 500);
+        }
+
+        // ==========================================
+        // УНИВЕРСАЛЬНАЯ СИСТЕМА УПРАВЛЕНИЯ (PC + MOBILE)
+        // ==========================================
+
+        let isDragging = false;
+        let hasMoved = false; // Предохранитель: двигали ли мы камеру?
+        let lastX = 0;
+        let lastY = 0;
+        let touchStartTime = 0;
+
+        function getEventPos(e) {
+            // Безопасное получение координат даже при touchend
+            if (e.type.includes('touch')) {
+                const touch = e.touches[0] || e.changedTouches[0];
+                return { x: touch.clientX, y: touch.clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        function handleInteraction(screenX, screenY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = screenX - rect.left;
+            const y = screenY - rect.top;
+            
+            if (PlacementSystem.isPlacing) {
+                if (!PlacementSystem.currentItem) {
+                    PlacementSystem.cancelPlacement();
+                    return;
+                }
+                const { gx, gy } = screenToGrid(screenX, screenY);
+                PlacementSystem.placeObject(gx, gy);
+                return;
+            }
+            
+            const clickedBug = GameState.bugs.find(bug => {
+                const iso = toIso(bug.x, bug.y, 0.1);
+                const dx = iso.x - x;
+                const dy = iso.y - y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                return distance < 15 * camera.zoom;
+            });
+            
+            if (clickedBug) {
+                fixBug(clickedBug.id);
+            }
+        }
+
+        function handleStart(e) {
+            if (e.target.tagName === 'BUTTON' || e.target.closest('.ui-panel')) return;
+            
+            isDragging = true;
+            hasMoved = false; // Сбрасываем предохранитель при новом клике
+            const pos = getEventPos(e);
+            lastX = pos.x;
+            lastY = pos.y;
+            touchStartTime = Date.now();
+            
+            // Убрали вызов handleInteraction отсюда!
+        }
+
+        function handleMove(e) {
+            if (e.target.closest('.ui-panel')) return;
+            if (e.cancelable) e.preventDefault(); // Защита от ошибок в консоли
+
+            const pos = getEventPos(e);
+
+            if (isDragging) {
+                const dx = pos.x - lastX;
+                const dy = pos.y - lastY;
+
+                // Если курсор сдвинулся больше чем на 3 пикселя — это свайп/перетаскивание камеры
+                if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+                    hasMoved = true; 
+                }
+
+                // Используем систему камеры с ограничениями
+                CameraSystem.updateCamera(dx, dy);
+
+                lastX = pos.x;
+                lastY = pos.y;
+            } 
+            
+            // На ПК обновление превью работает всегда при движении мыши (Hover эффект)
+            if (PlacementSystem.isPlacing) {
+                const { gx, gy } = screenToGrid(pos.x, pos.y);
+                PlacementSystem.updatePreview(gx, gy);
+            }
+        }
+
+        function handleEnd(e) {
+            if (!isDragging) return;
+
+            // Клик засчитывается ТОЛЬКО если мы НЕ тащили камеру и сделали это быстро
+            if (!hasMoved && (Date.now() - touchStartTime < 300)) {
+                handleInteraction(lastX, lastY); // Используем lastX/Y, так как палец уже убран
+            }
+
+            isDragging = false;
+            hasMoved = false;
+        }
+
+        // Слушатели событий
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', handleEnd); // Если курсор ушел за пределы игры
+
+        canvas.addEventListener('touchstart', handleStart, { passive: false });
+        canvas.addEventListener('touchmove', handleMove, { passive: false });
+        canvas.addEventListener('touchend', handleEnd);
+
+        // ==================== ОБРАБОТЧИКИ КНОПОК ====================
+        
+        // Безопасная функция: если кнопки нет, она просто ничего не делает и не ломает игру
+        function setupSafeClick(id, callback) {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('click', callback);
+            }
+        }
+
+        // Кнопка работы (если ты решишь её вернуть позже)
+        setupSafeClick('work-btn', (e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            
+            GameState.tsp += GameState.clickPower;
+            QuestSystem.updateProgress('click', 1);
+            
+            spawnFloatingText(`+$${GameState.clickPower}`, x, y, '#3b82f6');
+            updateUI();
+        });
+
+        // Закрытие панелей по клику на темный фон
+        document.querySelectorAll('#shop-panel, #event-panel, #skins-panel, #quest-panel').forEach(panel => {
+            panel.addEventListener('click', (e) => {
+                if (e.target === panel) {
+                    panel.classList.add('hidden');
+                }
+            });
+        });
+
+        // Горячие клавиши (Escape для закрытия окон)
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (PlacementSystem.isPlacing) {
+                    PlacementSystem.cancelPlacement();
+                } else {
+                    document.querySelectorAll('#shop-panel, #event-panel, #skins-panel').forEach(p => p.classList.add('hidden'));
+                }
+            }
+            
+            if (e.ctrlKey && e.key === 's') {
+                e.preventDefault();
+                SaveSystem.save();
+            }
+            if (e.ctrlKey && e.key === 'l') {
+                e.preventDefault();
+                SaveSystem.load();
+                updateUI();
+                if(typeof updateTechDebtUI === 'function') updateTechDebtUI();
+                populateShop();
+                updateQuestUI();
+            }
+        });
+
+        // ==================== ФУНКЦИИ ПОКУПКИ ====================
+        function tryBuyItem(itemId) {
+            const item = ITEM_TYPES[itemId];
+            if (!item) return;
+            
+            const currentCount = [...GameState.objects, ...GameState.npcs].filter(o => o.id === itemId).length;
+            const limit = GameState.limits[itemId] || 99;
+            
+            if (currentCount >= limit) {
+                showNotification("Достигнут лимит!", "error");
+                return;
+            }
+
+            const room = RoomSystem.getRoomForItem(itemId);
+            if (room && room.isLocked) {
+                showNotification(`Сначала откройте комнату "${room.name}"!`, "error");
+                return;
+            }
+
+            // Проверяем актуальную цену
+            const stats = getCurrentItemStats(itemId);
+            
+            if (GameState.tsp >= stats.cost) {
+                const success = PlacementSystem.buyAndPlaceAutomatically(itemId);
+                if (success) {
+                    populateShop(); // Перерисовываем магазин с уже новыми ценами (х5)
+                }
+            } else {
+                showNotification("Недостаточно средств!", "error");
+            }
+        }
+
+        // Функция покупки комнаты
+        function buyRoom(roomId) {
+            const room = RoomSystem.rooms.find(r => r.id === roomId);
+            if (!room || !room.isLocked) return;
+            
+            const price = GameState.roomPrices[roomId];
+            
+            if (GameState.tsp >= price) {
+                GameState.tsp -= price;
+                room.isLocked = false;
+                
+                showNotification(`✅ Комната "${room.name}" открыта!`, 'success');
+                
+                // --- ДОБАВЛЕНО: Обновляем прогресс квеста ---
+                QuestSystem.updateProgress('unlock_room', 1, roomId);
+                
+                // Обновляем UI и магазин
+                updateQuestUI();
+                populateShop(); 
+                SaveSystem.save();
+                
+                return true;
+            } else {
+                showNotification(`Недостаточно средств! Нужно: $${price}`, 'error');
+                return false;
+            }
+        }
+
+        // Эмодзи для комнат
+        function getRoomEmoji(roomId) {
+            const emojiMap = {
+                'dev_room': '💻',
+                'server_room': '🖥️',
+                'meeting_room': '🤝',
+                'break_room': '☕'
+            };
+            return emojiMap[roomId] || '🏢';
+        }
+
+        window.togglePanel = togglePanel;
+        window.assignWorkers = function() {
+            const availableWorkstations = GameState.objects.filter(obj => {
+                const itemType = ITEM_TYPES[obj.id];
+                return itemType && itemType.type === 'workstation' && !obj.isOccupied;
+            });
+            
+            const idleNpcs = GameState.npcs.filter(npc => npc.state === 'idle');
+            
+            let assigned = 0;
+            idleNpcs.forEach(npc => {
+                if (availableWorkstations.length > 0) {
+                    const workstation = availableWorkstations.shift();
+                    if (WorkSystem.assignToWorkstation(npc, workstation)) {
+                        assigned++;
+                    }
+                }
+            });
+            
+            if (assigned > 0) {
+                showNotification(`Назначено рабочих: ${assigned}`, 'success');
+            } else {
+                showNotification('Нет свободных рабочих мест или работников', 'info');
+            }
+        };
+
+        // Делаем функцию центрирования камеры доступной глобально
+        window.centerCamera = centerCamera;
+
+        // Делаем RoomSystem доступной глобально для отладки
+        window.RoomSystem = RoomSystem;
+        window.PlacementSystem = PlacementSystem;
+
+        // ==================== ВЫХОД В МАГАЗИН ====================
+        window.returnToStore = function() {
+            try {
+                // Пытаемся вызвать функцию toggleGame(false) из главного окна магазина
+                if (window.parent && typeof window.parent.toggleGame === 'function') {
+                    window.parent.toggleGame(false);
+                } else {
+                    // Если не получилось найти функцию, просто перенаправляем всю страницу
+                    window.top.location.href = 'https://tonstore.onrender.com/';
+                }
+            } catch (e) {
+                // Защита от ошибок Cross-Origin (если браузер блокирует доступ к родителю)
+                window.top.location.href = 'https://tonstore.onrender.com/';
+            }
+        };
+
+        // ==================== СБРОС ПРОГРЕССА (БЕТА-ТЕСТ) ====================
+        window.resetProgress = async function() {
+            const isConfirmed = confirm("⚠️ Вы уверены, что хотите полностью сбросить весь прогресс?");
+            
+            if (isConfirmed) {
+                const playerId = SaveSystem.getPlayerId();
+                try {
+                    // Удаляем документ игрока из базы
+                    await db.collection("players").doc(playerId).delete();
+                    localStorage.removeItem('test_player_id'); // очищаем тестовый ID
+                    console.log("Облачное сохранение удалено.");
+                } catch (e) {
+                    console.error("Ошибка при удалении сохранения:", e);
+                }
+                
+                window.location.reload();
+            }
+        };
+        
+        // Делаем функцию центрирования камеры доступной глобально
+        window.centerCamera = centerCamera;
+        window.addEventListener('load', init);
+
+    </script>
+    <button id="settingsBtn" class="fixed top-16 right-4 z-[55] bg-slate-800 border-2 border-slate-600 rounded-full w-10 h-10 flex items-center justify-center text-white shadow-lg transition-transform hover:scale-105" onclick="toggleSettings()">
+        ⚙️
+    </button>
+
+    <div id="settingsPanel" class="hidden fixed inset-0 z-[60] bg-black/70 flex items-center justify-center backdrop-blur-sm transition-opacity">
+        <div class="bg-slate-900 border-2 border-slate-600 rounded-xl p-6 w-[90%] max-w-sm shadow-2xl relative">
+            <button onclick="toggleSettings()" class="absolute top-3 right-4 text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+            
+            <h2 class="text-xl font-bold text-white mb-6 text-center">Настройки</h2>
+            
+            <div class="space-y-4">
+                <div class="bg-slate-800 p-4 rounded-lg border border-slate-700">
+                    <p class="text-sm text-slate-400 mb-3">Привязка кошелька</p>
+                    <button id="walletToggleBtn" onclick="toggleWalletConnection()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded transition duration-200">
+                        Привязать кошелек
+                    </button>
+                </div>
+                
+                <div class="bg-slate-800 p-4 rounded-lg border border-slate-700 opacity-60">
+                    <p class="text-sm text-slate-400 mb-2">Звук и Музыка</p>
+                    <p class="text-xs text-slate-500 italic">Скоро появится...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

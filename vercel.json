@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/bot/(.*)", "destination": "/api/bot.js" },
+    { "source": "/api/(.*)", "destination": "/api/game.js" }
+  ]
+}
