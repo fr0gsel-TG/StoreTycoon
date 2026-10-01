@@ -555,7 +555,7 @@
 <div id="shareCardModal" class="hidden fixed inset-0 z-[230] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-4 pt-[calc(var(--tg-header-height,60px)+0.5rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)]">
     <div class="w-full max-w-sm flex flex-col gap-3">
         <div class="flex items-center justify-between">
-            <div class="text-lg font-black text-white">📸 Карточка офиса</div>
+            <div class="text-lg font-black text-white">📸 Карточка CEO</div>
             <button onclick="ShareCard.close()" class="w-9 h-9 rounded-full bg-slate-800 text-white">✕</button>
         </div>
         <div class="relative rounded-2xl overflow-hidden border border-slate-700 bg-slate-900" style="aspect-ratio: 4 / 5;">
@@ -2554,89 +2554,206 @@ const ShareCard = {
         return out;
     },
 
+    // ---- Премиальная карточка: скины + процедурный фон в стиле лиги ----
+    SKIN_IMG: {
+        npc1: './npc_skin_defult/npc1.png', npc2: './npc_skin_defult/npc2.png', npc3: './npc_skin_defult/npc3.png',
+        npc4: './npc_skin_defult/npc4.png', npc5: './npc_skin_defult/npc5.png', npc6: './npc_skin_defult/npc6.png',
+        npc7: './npc_skin_defult/npc7.png', pepe: './npc_skin_lega/pepe.png', freedur: './npc_skin_lega/freedur.png'
+    },
+    SKIN_META: {
+        npc1: ['Стажер', 0], npc2: ['Джуниор', 0], npc3: ['Мидл', 0], npc4: ['Сборщик', 0],
+        npc5: ['Сеньор', 1], npc6: ['Тимлид', 1], npc7: ['Девопс', 1], pepe: ['Пепе', 2], freedur: ['Фридур', 2]
+    },
+    SKIN_ORDER: ['freedur', 'pepe', 'npc7', 'npc6', 'npc5', 'npc4', 'npc3', 'npc2', 'npc1'],
+    RARITY: [
+        { name: 'ОБЫЧНЫЙ', color: '#60a5fa', glow: 'rgba(96,165,250,0.55)' },
+        { name: 'ЭПИЧЕСКИЙ', color: '#c084fc', glow: 'rgba(192,132,252,0.6)' },
+        { name: 'ЛЕГЕНДАРНЫЙ', color: '#fbbf24', glow: 'rgba(251,191,36,0.65)' }
+    ],
+    // Палитры лиг: [верх фона, низ фона, неон, акцент]
+    THEMES: [
+        ['#1c1917', '#431407', '#fb923c', '#fdba74'],   // Гаражный стартап — тёплый оранжевый
+        ['#0c1a3a', '#082f49', '#38bdf8', '#7dd3fc'],   // Офисный дата-центр — холодный синий
+        ['#0b1020', '#1e1b4b', '#818cf8', '#a5b4fc'],   // IT-Гигант — индиго
+        ['#0a0014', '#3b0764', '#e879f9', '#f0abfc'],   // Кибер-Синдикат — неон-фиолет
+        ['#020617', '#052e2b', '#2dd4bf', '#fde68a']    // Титаны ИИ — бирюза + золото
+    ],
+    _rand(seed) { let s = seed >>> 0 || 1; return () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296; },
+    _pickSkins() {
+        const owned = new Set(GameState.playerSkins || ['npc1']);
+        const equipped = (GameState.appliedSkins || {})['employee_dev'];
+        const list = this.SKIN_ORDER.filter(id => owned.has(id));
+        let hero = list[0] || 'npc1';
+        // Если надет скин той же редкости, что и лучший — показываем надетый
+        if (equipped && owned.has(equipped) && this.SKIN_META[equipped] && this.SKIN_META[equipped][1] >= this.SKIN_META[hero][1]) hero = equipped;
+        const crew = list.filter(id => id !== hero);
+        for (const d of ['npc3', 'npc2', 'npc1']) if (crew.length < 2 && d !== hero && !crew.includes(d)) crew.push(d);
+        return { hero, crew: crew.slice(0, 2) };
+    },
+
     async render() {
-        const office = await this.captureOffice();
+        const W = this.W, H = this.H;
         const league = LeagueUI.data || await LeagueUI.fetch();
-        const logo = await this._img('./logo.png');
+        const tierId = league ? league.tier : 0;
+        const tier = league && league.tiers ? league.tiers[tierId] : { icon: '🏆', name: 'Недельная лига' };
+        const [bgTop, bgBot, neon, accent] = this.THEMES[tierId] || this.THEMES[0];
+        const { hero, crew } = this._pickSkins();
+        const [heroImg, crewA, crewB, logo] = await Promise.all([
+            this._img(this.SKIN_IMG[hero]), this._img(this.SKIN_IMG[crew[0]]), this._img(this.SKIN_IMG[crew[1]]), this._img('./logo.png')
+        ]);
+        const rar = this.RARITY[(this.SKIN_META[hero] || ['', 0])[1]];
         const user = window.Telegram?.WebApp?.initDataUnsafe?.user || {};
-        const name = user.username ? '@' + user.username : ([user.first_name, user.last_name].filter(Boolean).join(' ') || 'CEO');
+        const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || (user.username ? '@' + user.username : 'CEO');
+        const rnd = this._rand((user.id || 7) * 31 + tierId);
+        const F = 'system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
 
         const cv = document.createElement('canvas');
-        cv.width = this.W; cv.height = this.H;
+        cv.width = W; cv.height = H;
         const c = cv.getContext('2d');
-        const F = 'Arial, "Noto Sans", sans-serif';
 
-        // Фон
-        const g = c.createLinearGradient(0, 0, this.W, this.H);
-        g.addColorStop(0, '#0f172a'); g.addColorStop(0.55, '#1e1b4b'); g.addColorStop(1, '#0f172a');
-        c.fillStyle = g; c.fillRect(0, 0, this.W, this.H);
-        c.globalAlpha = 0.08; c.strokeStyle = '#818cf8'; c.lineWidth = 2;
-        for (let i = -this.H; i < this.W; i += 60) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i + this.H, this.H); c.stroke(); }
+        // 1. Фон
+        let g = c.createLinearGradient(0, 0, 0, H);
+        g.addColorStop(0, bgTop); g.addColorStop(1, bgBot);
+        c.fillStyle = g; c.fillRect(0, 0, W, H);
+
+        // звёзды/боке
+        for (let i = 0; i < 90; i++) {
+            const x = rnd() * W, y = rnd() * H * 0.62, r = rnd() * 2.2 + 0.4;
+            c.globalAlpha = 0.25 + rnd() * 0.6; c.fillStyle = rnd() > 0.8 ? accent : '#ffffff';
+            c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+        }
         c.globalAlpha = 1;
 
-        // Шапка
-        if (logo) c.drawImage(logo, 60, 50, 110, 110);
-        c.fillStyle = '#fff'; c.font = `900 60px ${F}`; c.textBaseline = 'middle';
-        c.fillText('StoreTycoon', logo ? 195 : 60, 88);
-        c.fillStyle = '#a5b4fc'; c.font = `bold 34px ${F}`;
-        c.fillText(this._fit(c, `Офис ${name}`, 800), logo ? 195 : 60, 140);
-
-        // Офис
-        const ox = 60, oy = 200, os = 960;
-        c.save(); this._rr(c, ox, oy, os, 700, 36); c.clip();
-        c.fillStyle = CONFIG.colors.background; c.fillRect(ox, oy, os, 700);
-        // квадратный кадр → вписываем по ширине, центрируем по вертикали
-        c.drawImage(office, 0, office.height * (1 - 700 / os) / 2, office.width, office.height * 700 / os, ox, oy, os, 700);
-        c.restore();
-        c.lineWidth = 6; c.strokeStyle = '#6366f1'; this._rr(c, ox, oy, os, 700, 36); c.stroke();
-
-        // Статистика
-        const income = (GameState.autoClicker || 0) * (GameState.incomeMultiplier || 1) * LeagueUI.boostMult();
-        const devs = (GameState.npcs || []).filter(n => n.id === 'employee_dev').length;
-        const leads = (GameState.npcs || []).filter(n => n.id === 'employee_manager').length;
-        const stats = [
-            ['💰', LeagueUI.fmt(income) + '/сек', 'доход'],
-            ['👨‍💻', String(devs + leads), 'сотрудников'],
-            ['🏢', String(GameState.companyLevel || 1), 'уровень'],
-        ];
-        const sw = 300, sy = 930;
-        stats.forEach((s, i) => {
-            const x = 60 + i * (sw + 30);
-            c.fillStyle = 'rgba(30,41,59,0.9)'; this._rr(c, x, sy, sw, 150, 28); c.fill();
-            c.strokeStyle = 'rgba(99,102,241,0.5)'; c.lineWidth = 3; c.stroke();
-            c.textAlign = 'center';
-            c.font = `56px ${F}`; c.fillText(s[0], x + sw / 2, sy + 45);
-            c.fillStyle = '#fbbf24'; c.font = `bold 40px ${F}`; c.fillText(this._fit(c, s[1], sw - 20), x + sw / 2, sy + 98);
-            c.fillStyle = '#94a3b8'; c.font = `26px ${F}`; c.fillText(s[2], x + sw / 2, sy + 132);
-            c.textAlign = 'left';
-        });
-
-        // Лига
-        const ly = 1110;
-        const lg = c.createLinearGradient(60, ly, 1020, ly);
-        lg.addColorStop(0, '#f59e0b'); lg.addColorStop(1, '#d97706');
-        c.fillStyle = lg; this._rr(c, 60, ly, 960, 130, 30); c.fill();
-        c.fillStyle = '#0f172a';
-        if (league && league.tiers) {
-            const t = league.tiers[league.tier] || league.tiers[0];
-            c.font = `64px ${F}`; c.fillText(t.icon, 90, ly + 66);
-            c.font = `900 42px ${F}`; c.fillText(this._fit(c, t.name, 520), 180, ly + 48);
-            c.font = `bold 30px ${F}`;
-            c.fillText(`Место ${league.myPlace || '—'} из ${league.size} · ${LeagueUI.fmt(league.myPoints)} IPO`, 180, ly + 94);
-            const r = league.lastResult;
-            if (r && r.change === 'up') {
-                c.textAlign = 'right'; c.font = `900 34px ${F}`; c.fillText('🚀 Повышение!', 990, ly + 66); c.textAlign = 'left';
+        // 2. Силуэт города с окнами
+        const horizon = 840;
+        let x = -20;
+        while (x < W) {
+            const bw = 50 + rnd() * 90, bh = 120 + rnd() * 330;
+            c.fillStyle = 'rgba(0,0,0,0.45)';
+            c.fillRect(x, horizon - bh, bw, bh);
+            for (let wy = horizon - bh + 14; wy < horizon - 14; wy += 22) {
+                for (let wx = x + 8; wx < x + bw - 10; wx += 16) {
+                    if (rnd() < 0.28) { c.fillStyle = rnd() < 0.5 ? neon : accent; c.globalAlpha = 0.25 + rnd() * 0.5; c.fillRect(wx, wy, 7, 10); }
+                }
             }
-        } else {
-            c.font = `900 42px ${F}`; c.fillText('🏆 Недельная лига', 90, ly + 66);
+            c.globalAlpha = 1;
+            x += bw + 4 + rnd() * 10;
         }
 
-        // Подвал
-        c.fillStyle = '#c7d2fe'; c.font = `bold 32px ${F}`; c.textAlign = 'center';
-        c.fillText('Построй свой IT-офис 👉 @DigitalCryptoStore_bot', this.W / 2, 1300);
+        // 3. Неоновый пол в перспективе
+        g = c.createLinearGradient(0, horizon, 0, H);
+        g.addColorStop(0, 'rgba(0,0,0,0.2)'); g.addColorStop(1, 'rgba(0,0,0,0.75)');
+        c.fillStyle = g; c.fillRect(0, horizon, W, H - horizon);
+        c.strokeStyle = neon; c.lineWidth = 2;
+        for (let i = 0; i <= 14; i++) {
+            const t = i / 14; const y = horizon + Math.pow(t, 2.2) * (H - horizon);
+            c.globalAlpha = 0.15 + t * 0.5; c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke();
+        }
+        for (let i = -12; i <= 12; i++) {
+            c.globalAlpha = 0.35; c.beginPath(); c.moveTo(W / 2 + i * 22, horizon); c.lineTo(W / 2 + i * 190, H); c.stroke();
+        }
+        c.globalAlpha = 1;
+        // свечение горизонта
+        g = c.createLinearGradient(0, horizon - 60, 0, horizon + 40);
+        g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.6, neon); g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.globalAlpha = 0.35; c.fillStyle = g; c.fillRect(0, horizon - 60, W, 100); c.globalAlpha = 1;
+
+        // 4. Прожектор за героем
+        const hx = 720, footY = 1150;
+        g = c.createRadialGradient(hx, 560, 40, hx, 560, 520);
+        g.addColorStop(0, rar.glow); g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = g; c.fillRect(0, 0, W, H);
+
+        const drawChar = (img, cx, h, opts = {}) => {
+            if (!img) return;
+            const w = img.width * (h / img.height);
+            // тень на полу
+            c.save();
+            c.globalAlpha = opts.shadow ?? 0.55; c.fillStyle = '#000';
+            c.beginPath(); c.ellipse(cx, footY, w * 0.45, 22, 0, 0, Math.PI * 2); c.fill();
+            c.restore();
+            c.save();
+            if (opts.filter) c.filter = opts.filter;
+            if (opts.glow) { c.shadowColor = opts.glow; c.shadowBlur = 45; }
+            c.drawImage(img, cx - w / 2, footY - h + 8, w, h);
+            c.restore();
+        };
+        // команда позади
+        drawChar(crewA, 470, 720, { filter: 'brightness(0.45) saturate(0.7)', shadow: 0.4 });
+        drawChar(crewB, 960, 700, { filter: 'brightness(0.4) saturate(0.7)', shadow: 0.4 });
+        // герой
+        drawChar(heroImg, hx, 930, { glow: rar.glow, shadow: 0.7 });
+
+        // 5. Шапка
+        g = c.createLinearGradient(0, 0, 0, 260);
+        g.addColorStop(0, 'rgba(0,0,0,0.65)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+        c.fillStyle = g; c.fillRect(0, 0, W, 260);
+        if (logo) c.drawImage(logo, 56, 50, 84, 84);
+        c.textBaseline = 'alphabetic';
+        c.fillStyle = '#fff'; c.font = `900 46px ${F}`; c.fillText('STORE TYCOON', logo ? 158 : 56, 102);
+        c.fillStyle = accent; c.font = `600 24px ${F}`; c.fillText('IT-ОФИС В TELEGRAM', logo ? 160 : 58, 134);
+
+        // бейдж лиги (справа сверху)
+        const bx = W - 56, by = 56;
+        c.font = `800 26px ${F}`;
+        const label = tier.name.toUpperCase();
+        const bwid = Math.max(260, c.measureText(label).width + 120);
+        c.fillStyle = 'rgba(0,0,0,0.55)'; this._rr(c, bx - bwid, by, bwid, 84, 42); c.fill();
+        c.strokeStyle = neon; c.lineWidth = 3; c.stroke();
+        c.font = `44px ${F}`; c.textAlign = 'left'; c.fillText(tier.icon, bx - bwid + 22, by + 58);
+        c.fillStyle = '#fff'; c.font = `800 26px ${F}`; c.fillText(label, bx - bwid + 86, by + 38);
+        c.fillStyle = accent; c.font = `600 20px ${F}`; c.fillText('ЛИГА НЕДЕЛИ', bx - bwid + 86, by + 64);
+
+        // 6. Левая колонка: имя и статистика (стекло)
+        const px = 56, py = 300, pw = 430;
+        c.fillStyle = 'rgba(2,6,23,0.55)'; this._rr(c, px, py, pw, 560, 32); c.fill();
+        c.strokeStyle = 'rgba(255,255,255,0.12)'; c.lineWidth = 2; c.stroke();
+        c.fillStyle = accent; c.font = `700 22px ${F}`; c.fillText('CEO КОМПАНИИ', px + 32, py + 52);
+        c.fillStyle = '#fff'; c.font = `900 50px ${F}`; c.fillText(this._fit(c, name, pw - 64), px + 32, py + 110);
+
+        const income = (GameState.autoClicker || 0) * (GameState.incomeMultiplier || 1) * LeagueUI.boostMult();
+        const staff = (GameState.npcs || []).length;
+        const rows = [
+            ['ДОХОД', '$' + LeagueUI.fmt(income) + '/сек', '#fbbf24'],
+            ['КОМАНДА', staff + ' чел.', '#fff'],
+            ['УРОВЕНЬ', String(GameState.companyLevel || 1), '#fff']
+        ];
+        if (league && league.myPlace) rows.push(['МЕСТО В ЛИГЕ', `#${league.myPlace} из ${league.size}`, neon]);
+        rows.forEach((r, i) => {
+            const y = py + 175 + i * 92;
+            c.fillStyle = 'rgba(255,255,255,0.08)'; c.fillRect(px + 32, y - 40, pw - 64, 1.5);
+            c.fillStyle = '#94a3b8'; c.font = `700 20px ${F}`; c.fillText(r[0], px + 32, y - 8);
+            c.fillStyle = r[2]; c.font = `900 40px ${F}`; c.fillText(this._fit(c, r[1], pw - 64), px + 32, y + 36);
+        });
+
+        // 7. Плашка редкости героя
+        const heroName = (this.SKIN_META[hero] || ['Сотрудник'])[0];
+        c.font = `800 24px ${F}`;
+        const tag = `${rar.name} · ${heroName.toUpperCase()}`;
+        const tw = c.measureText(tag).width + 56;
+        c.fillStyle = 'rgba(0,0,0,0.6)'; this._rr(c, hx - tw / 2, footY + 24, tw, 52, 26); c.fill();
+        c.strokeStyle = rar.color; c.lineWidth = 3; c.stroke();
+        c.fillStyle = rar.color; c.textAlign = 'center'; c.fillText(tag, hx, footY + 59);
+
+        // повышение
+        if (league && league.lastResult && league.lastResult.change === 'up') {
+            c.save(); c.translate(px + pw - 10, py - 6); c.rotate(0.12);
+            c.fillStyle = '#22c55e'; this._rr(c, -190, -26, 200, 52, 14); c.fill();
+            c.fillStyle = '#fff'; c.font = `900 24px ${F}`; c.fillText('ПОВЫШЕНИЕ!', -90, 9);
+            c.restore();
+        }
+
+        // 8. CTA внизу
+        c.textAlign = 'left';
+        g = c.createLinearGradient(0, H - 130, 0, H);
+        g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.8)');
+        c.fillStyle = g; c.fillRect(0, H - 130, W, 130);
+        c.fillStyle = neon; this._rr(c, 56, H - 112, W - 112, 72, 36); c.fill();
+        c.fillStyle = '#0b1020'; c.font = `900 30px ${F}`; c.textAlign = 'center';
+        c.fillText('ПОСТРОЙ СВОЙ ОФИС  →  @DigitalCryptoStore_bot', W / 2, H - 66);
         c.textAlign = 'left';
 
-        return cv.toDataURL('image/jpeg', 0.88);
+        return cv.toDataURL('image/jpeg', 0.9);
     },
 
     async open() {
