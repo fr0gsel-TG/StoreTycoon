@@ -1,0 +1,59 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "AI: Изменить код в текущем файле",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "${workspaceFolder}/smart_assistant.py",
+                "--study",
+                "${file}",
+                "${input:task}"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            }
+        },
+        {
+            "label": "AI: Создать новый файл в стиле текущего",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "${workspaceFolder}/smart_assistant.py",
+                "--write",
+                "${file}",
+                "${input:task}",
+                "--output",
+                "${input:output_file}"
+            ]
+        },
+        {
+            "label": "AI: Рефакторинг текущего файла",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "${workspaceFolder}/smart_assistant.py",
+                "--refactor",
+                "${file}",
+                "${input:task}"
+            ]
+        }
+    ],
+    "inputs": [
+        {
+            "id": "task",
+            "description": "Опишите задачу для AI:",
+            "type": "promptString",
+            "default": "добавь комментарии и докстринги"
+        },
+        {
+            "id": "output_file",
+            "description": "Имя нового файла",
+            "type": "promptString",
+            "default": "new_module.py"
+        }
+    ]
+}
