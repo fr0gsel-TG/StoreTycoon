@@ -212,6 +212,8 @@ app.post('/api/action/sync-income', async (req, res) => {
         let newAutoClicker = 0;
         let credited = 0;
         let knownLeague = null;
+        let knownClan = null;
+        let syncElapsedSec = 0;
 
         await db.runTransaction(async (transaction) => {
             const playerDoc = await transaction.get(playerRef);
@@ -220,12 +222,14 @@ app.post('/api/action/sync-income', async (req, res) => {
 
             const progress = playerDoc.data().progress || {};
             knownLeague = playerDoc.data().league || null;
+            knownClan = playerDoc.data().clan || null;
             const now = Date.now();
 
             // Сервер сам считает, сколько игрок мог заработать с прошлой синхронизации.
             // Сумма от клиента — только заявка, начисляется не больше потолка.
             const lastSync = toMillis(progress.lastIncomeSync) || toMillis(progress.lastSaved) || now;
             const elapsedSec = Math.min(Math.max((now - lastSync) / 1000, 0), MAX_SYNC_WINDOW_SEC);
+            syncElapsedSec = elapsedSec;
 
             newAutoClicker = GameFormulas.recalculateGlobalIncome(progress);
             const clickPower = progress.clickPower || 1;
@@ -244,6 +248,7 @@ app.post('/api/action/sync-income', async (req, res) => {
         });
 
         await LeagueSystem.addPoints(playerId, credited, LeagueSystem.displayName(initData), knownLeague);
+        await ClanSystem.addCup(playerId, knownClan, credited, newAutoClicker, syncElapsedSec, knownLeague && knownLeague.tier);
         res.json({ success: true, newBalance, newAutoClicker, credited });
 
     } catch (error) {
@@ -1140,7 +1145,10 @@ app.post('/api/load', async (req, res) => {
                 'lastSaved': admin.firestore.FieldValue.serverTimestamp() 
             });
 
-            if (offlineIncome > 0) await LeagueSystem.addPoints(playerId, offlineIncome, LeagueSystem.displayName(initData));
+            if (offlineIncome > 0) {
+                await LeagueSystem.addPoints(playerId, offlineIncome, LeagueSystem.displayName(initData));
+                await ClanSystem.addCup(playerId, data.clan, offlineIncome, progress.autoClicker, Math.min(Math.floor((now - lastSavedTime) / 1000), progress.offlineLimit || DEFAULT_OFFLINE_LIMIT_SEC), data.league && data.league.tier);
+            }
 
             return res.json({ 
                 success: true, 
@@ -1689,6 +1697,457 @@ app.get('/api/share/img', async (req, res) => {
     } catch (e) {
         res.status(404).end();
     }
+});
+
+// ==========================================
+// КЛАНЫ (ХОЛДИНГИ) И НЕДЕЛЬНЫЙ КУБОК КЛАНОВ
+// ==========================================
+// - Создать клан можно только за TST (CLAN_CREATE_COST_TST, по умолчанию 250 = один пакет).
+// - Вступление бесплатное: открытые кланы видны в списке, закрытые — только по ссылке-приглашению.
+// - Очки кубка не зависят от богатства игрока: это "часы работы офиса" за неделю
+//   (заработанное / доход в секунду), умноженные на коэффициент лиги игрока.
+//   Поэтому новичок и кит вносят сопоставимый вклад — важна активность всей команды.
+// - Итоги кубка подводятся лениво (как у лиг), награда забирается кнопкой.
+const CLAN_CREATE_COST_TST = parseInt(process.env.CLAN_CREATE_COST_TST, 10) || 250;
+const CLAN_MAX_MEMBERS = parseInt(process.env.CLAN_MAX_MEMBERS, 10) || 30;
+const CLAN_REJOIN_COOLDOWN_MS = (parseFloat(process.env.CLAN_REJOIN_COOLDOWN_H) || 12) * 3600000;
+const CLAN_EMBLEMS = ['🚀', '💻', '🛡️', '⚡', '🐸', '🦾', '🧠', '🔥', '👾', '🏴‍☠️', '💎', '🌐', '🐉', '👑', '🦊', '🤖'];
+const CLAN_CUP_POINTS_PER_HOUR = 10;
+const CLAN_CUP_TIER_MULT = [1, 1.2, 1.4, 1.7, 2];
+const CLAN_CUP_MIN_HOURS = 3;            // минимум личного вклада за неделю для награды
+const CLAN_CUP_MIN_JOIN_BEFORE_END_MS = 48 * 3600000; // вступить нужно минимум за 48ч до конца недели
+const CLAN_CUP_TST_MIN_CLANS = 5;        // TST-призы — только если в кубке участвует ≥5 кланов
+const CLAN_CUP_TST_MIN_ACTIVE = 5;       // ...и в клане ≥5 активных участников
+const CLAN_CUP_REWARDS = {
+    top1:  { h: 3, boost: [1.5, 6], tst: 30 },
+    top3:  { h: 2, boost: [1.5, 4], tst: 20 },
+    top10: { h: 2, tst: 10 },
+    top25: { h: 3 },
+    active:{ h: 1 }
+};
+
+const ClanSystem = {
+    cupRef(week) { return db.collection('clanCup').doc(week); },
+    validName(name) {
+        if (typeof name !== 'string') return null;
+        const n = name.replace(/\s+/g, ' ').trim();
+        if (n.length < 3 || n.length > 20) return null;
+        if (!/^[\p{L}\p{N} _\-.]+$/u.test(n)) return null;
+        return n;
+    },
+    newId() { return crypto.randomBytes(6).toString('base64url').replace(/[^A-Za-z0-9]/g, 'x'); },
+    publicClan(id, c) {
+        return {
+            id, name: c.name, emblem: c.emblem, description: c.description || '', open: !!c.open,
+            memberCount: c.memberCount || 0, maxMembers: c.maxMembers || CLAN_MAX_MEMBERS, leaderId: c.leaderId
+        };
+    },
+    prevWeekKey() { return 'w' + (LeagueSystem.weekIndex() - 1); },
+    weekEndOf(weekKey) {
+        const idx = parseInt(String(weekKey).slice(1), 10);
+        return EPOCH_MONDAY_MS + (idx + 1) * WEEK_MS - LEAGUE_TZ_OFFSET_MIN * 60000;
+    },
+
+    // Сбросить недельный вклад игрока при смене клана (очки остаются у старого клана)
+    resetMemberCup(tx, playerId, clanId, name, now) {
+        const week = LeagueSystem.weekKey();
+        tx.set(this.cupRef(week).collection('members').doc(playerId), {
+            playerId, clanId, name, points: 0, hours: 0, joinedAt: now, updatedAt: now
+        });
+    },
+
+    // Начисление очков кубка (после sync-income / оффлайн-дохода)
+    async addCup(playerId, knownClan, credited, income, elapsedSec, tier) {
+        if (!knownClan || !knownClan.id || !(credited > 0)) return;
+        try {
+            const byIncome = income > 0 ? credited / income / 3600 : Infinity;
+            const byTime = (elapsedSec || 0) / 3600 * 1.2;
+            const hours = Math.max(0, Math.min(byIncome, byTime));
+            if (!(hours > 0)) return;
+            const points = hours * CLAN_CUP_POINTS_PER_HOUR * (CLAN_CUP_TIER_MULT[LeagueSystem.clampTier(tier)] || 1);
+            const week = LeagueSystem.weekKey();
+            const inc = admin.firestore.FieldValue.increment;
+            const now = Date.now();
+            const batch = db.batch();
+            batch.set(this.cupRef(week).collection('clans').doc(knownClan.id), {
+                clanId: knownClan.id, points: inc(points), hours: inc(hours), updatedAt: now
+            }, { merge: true });
+            batch.set(this.cupRef(week).collection('members').doc(playerId), {
+                playerId, clanId: knownClan.id, points: inc(points), hours: inc(hours), updatedAt: now
+            }, { merge: true });
+            await batch.commit();
+        } catch (e) {
+            console.error('Clan addCup error:', e);
+        }
+    },
+
+    rewardFor(place, total, activeMembers, myHours) {
+        if (!(myHours >= CLAN_CUP_MIN_HOURS)) return null;
+        const tstAllowed = total >= CLAN_CUP_TST_MIN_CLANS && activeMembers >= CLAN_CUP_TST_MIN_ACTIVE;
+        let bracket = 'active';
+        if (tstAllowed && place === 1) bracket = 'top1';
+        else if (tstAllowed && place <= 3) bracket = 'top3';
+        else if (tstAllowed && place <= 10 && place <= Math.ceil(total * 0.3)) bracket = 'top10';
+        else if (place <= Math.max(1, Math.ceil(total * 0.25))) bracket = 'top25';
+        return bracket;
+    },
+
+    // Подвести итоги кубка прошлой недели для игрока (идемпотентно)
+    async settle(playerId) {
+        const prev = this.prevWeekKey();
+        const playerRef = db.collection('players').doc(playerId);
+        const pDoc = await playerRef.get();
+        if (!pDoc.exists) return null;
+        const pdata = pDoc.data();
+        if (pdata.clanCupSettled === prev) return pdata;
+
+        const memberDoc = await this.cupRef(prev).collection('members').doc(playerId).get();
+        let result = null, reward = null;
+        if (memberDoc.exists) {
+            const m = memberDoc.data();
+            const clanCupDoc = await this.cupRef(prev).collection('clans').doc(m.clanId).get();
+            if (clanCupDoc.exists) {
+                const clanPoints = clanCupDoc.data().points || 0;
+                const higher = await this.cupRef(prev).collection('clans').where('points', '>', clanPoints).count().get();
+                const totalSnap = await this.cupRef(prev).collection('clans').count().get();
+                const place = higher.data().count + 1;
+                const total = totalSnap.data().count;
+                const mates = await this.cupRef(prev).collection('members').where('clanId', '==', m.clanId).get();
+                const activeMembers = mates.docs.filter(d => (d.data().hours || 0) >= CLAN_CUP_MIN_HOURS).length;
+                const joinedInTime = (m.joinedAt || 0) <= this.weekEndOf(prev) - CLAN_CUP_MIN_JOIN_BEFORE_END_MS;
+                const bracket = joinedInTime ? this.rewardFor(place, total, activeMembers, m.hours || 0) : null;
+                const income = GameFormulas.recalculateGlobalIncome(pdata.progress || {}) || (pdata.progress || {}).autoClicker || 0;
+                const spec = bracket && CLAN_CUP_REWARDS[bracket];
+                if (spec) {
+                    reward = {
+                        week: prev, bracket, tsp: Math.floor((spec.h || 0) * 3600 * income), hours: spec.h || 0,
+                        boost: spec.boost ? { mult: spec.boost[0], hours: spec.boost[1] } : null,
+                        tst: spec.tst || 0, skin: null
+                    };
+                }
+                result = {
+                    week: prev, clanId: m.clanId, place, total, clanPoints: Math.floor(clanPoints),
+                    myPoints: Math.floor(m.points || 0), myHours: +(m.hours || 0).toFixed(1),
+                    activeMembers, bracket, joinedInTime, reward
+                };
+            }
+        }
+
+        return db.runTransaction(async (tx) => {
+            const d = await tx.get(playerRef);
+            const data = d.data();
+            if (data.clanCupSettled === prev) return data;
+            const updates = { clanCupSettled: prev };
+            if (result) {
+                updates.clanCupResult = result;
+                // незабранная награда прошлого кубка выдаётся автоматически
+                if (data.clanCupReward) Object.assign(updates, LeagueRewards.apply(data.progress || {}, data.clanCupReward).updates);
+                updates.clanCupReward = reward;
+            }
+            tx.update(playerRef, updates);
+            return { ...data, ...updates };
+        });
+    },
+
+    async getClanView(clanId, playerId) {
+        const clanDoc = await db.collection('clans').doc(clanId).get();
+        if (!clanDoc.exists) return null;
+        const c = clanDoc.data();
+        const week = LeagueSystem.weekKey();
+        const [cupDoc, membersSnap] = await Promise.all([
+            this.cupRef(week).collection('clans').doc(clanId).get(),
+            this.cupRef(week).collection('members').where('clanId', '==', clanId).get()
+        ]);
+        const contrib = {};
+        membersSnap.docs.forEach(d => { const m = d.data(); contrib[m.playerId] = m; });
+        const members = Object.entries(c.members || {}).map(([pid, m]) => ({
+            playerId: pid, name: m.name || 'Игрок', role: m.role || 'member', joinedAt: m.joinedAt || 0,
+            points: Math.floor((contrib[pid] && contrib[pid].points) || 0),
+            hours: +(((contrib[pid] && contrib[pid].hours) || 0)).toFixed(1),
+            isMe: pid === playerId
+        })).sort((a, b) => b.points - a.points || a.joinedAt - b.joinedAt);
+        const clanPoints = cupDoc.exists ? (cupDoc.data().points || 0) : 0;
+        let place = null;
+        if (clanPoints > 0) {
+            const higher = await this.cupRef(week).collection('clans').where('points', '>', clanPoints).count().get();
+            place = higher.data().count + 1;
+        }
+        const total = (await this.cupRef(week).collection('clans').count().get()).data().count;
+        return { ...this.publicClan(clanId, c), members, cup: { week, points: Math.floor(clanPoints), place, total } };
+    }
+};
+
+// Общая обвязка для clan-эндпоинтов: проверка подписи и ID
+async function clanAuth(req, res) {
+    const { initData } = req.body || {};
+    if (!verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN)) {
+        res.status(403).json({ success: false, error: 'Неверная подпись.' });
+        return null;
+    }
+    const playerId = getPlayerIdFromInitData(initData);
+    if (!playerId) { res.status(400).json({ success: false, error: 'Не удалось получить ID.' }); return null; }
+    return { playerId, name: LeagueSystem.displayName(initData) };
+}
+const CLAN_ERRORS = {
+    PLAYER_NOT_FOUND: [404, 'Игрок не найден.'],
+    ALREADY_IN_CLAN: [400, 'Вы уже состоите в клане.'],
+    NOT_IN_CLAN: [400, 'Вы не состоите в клане.'],
+    NOT_ENOUGH_TST: [400, `Нужно ${CLAN_CREATE_COST_TST} TST.`],
+    BAD_NAME: [400, 'Название: 3–20 символов, буквы, цифры, пробел, - _ .'],
+    NAME_TAKEN: [400, 'Такое название уже занято.'],
+    BAD_EMBLEM: [400, 'Неверная эмблема.'],
+    CLAN_NOT_FOUND: [404, 'Клан не найден.'],
+    CLAN_FULL: [400, 'В клане нет мест.'],
+    COOLDOWN: [400, 'После выхода из клана нужно подождать.'],
+    NOT_LEADER: [403, 'Только лидер может это сделать.'],
+    NOT_MEMBER: [400, 'Игрок не состоит в вашем клане.'],
+    NO_REWARD: [400, 'Награда уже получена.']
+};
+function clanError(res, e, where) {
+    const known = CLAN_ERRORS[e.message];
+    if (known) return res.status(known[0]).json({ success: false, error: known[1], code: e.message, until: e.until });
+    console.error(`Ошибка кланов (${where}):`, e);
+    res.status(500).json({ success: false, error: 'Внутренняя ошибка сервера' });
+}
+
+// Состояние кланов для игрока: свой клан, итоги кубка, стоимость создания
+app.post('/api/clan/me', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const pdata = await ClanSystem.settle(auth.playerId);
+        if (!pdata) throw new Error('PLAYER_NOT_FOUND');
+        const clan = pdata.clan && pdata.clan.id ? await ClanSystem.getClanView(pdata.clan.id, auth.playerId) : null;
+        res.json({
+            success: true,
+            clan,
+            myRole: clan ? (pdata.clan.role || 'member') : null,
+            createCost: CLAN_CREATE_COST_TST,
+            maxMembers: CLAN_MAX_MEMBERS,
+            emblems: CLAN_EMBLEMS,
+            rejoinAt: (pdata.clanLeftAt || 0) + CLAN_REJOIN_COOLDOWN_MS,
+            weekEndsAt: LeagueSystem.weekEndsAt(),
+            cupRewards: CLAN_CUP_REWARDS,
+            cupRules: { minHours: CLAN_CUP_MIN_HOURS, tstMinClans: CLAN_CUP_TST_MIN_CLANS, tstMinActive: CLAN_CUP_TST_MIN_ACTIVE },
+            lastCupResult: pdata.clanCupResult || null,
+            pendingCupReward: pdata.clanCupReward || null,
+            tst: (pdata.progress || {}).tst || 0
+        });
+    } catch (e) { clanError(res, e, 'me'); }
+});
+
+// Список: рейтинг кубка недели + открытые кланы + поиск по названию
+app.post('/api/clan/list', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const week = LeagueSystem.weekKey();
+        const q = String(req.body.query || '').trim().toLowerCase().slice(0, 20);
+        const cupSnap = await ClanSystem.cupRef(week).collection('clans').orderBy('points', 'desc').limit(30).get();
+        const cupPoints = {};
+        cupSnap.docs.forEach(d => { cupPoints[d.id] = d.data().points || 0; });
+        let found;
+        if (q) {
+            found = await db.collection('clans').where('nameLower', '>=', q).where('nameLower', '<=', q + '\uf8ff').limit(20).get();
+        } else {
+            found = await db.collection('clans').where('open', '==', true).limit(30).get();
+        }
+        const cupIds = Object.keys(cupPoints);
+        const cupDocs = cupIds.length ? await db.getAll(...cupIds.map(id => db.collection('clans').doc(id))) : [];
+        const top = cupDocs.filter(d => d.exists).map(d => ({ ...ClanSystem.publicClan(d.id, d.data()), points: Math.floor(cupPoints[d.id]) }))
+            .sort((a, b) => b.points - a.points).map((c, i) => ({ ...c, place: i + 1 }));
+        const clans = found.docs.map(d => ({ ...ClanSystem.publicClan(d.id, d.data()), points: Math.floor(cupPoints[d.id] || 0) }))
+            .filter(c => q || c.memberCount < c.maxMembers)
+            .sort((a, b) => b.points - a.points || b.memberCount - a.memberCount);
+        res.json({ success: true, week, top, clans });
+    } catch (e) { clanError(res, e, 'list'); }
+});
+
+// Публичная карточка клана (для экрана приглашения)
+app.post('/api/clan/info', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const id = String(req.body.clanId || '');
+        if (!/^[A-Za-z0-9]{4,20}$/.test(id)) throw new Error('CLAN_NOT_FOUND');
+        const view = await ClanSystem.getClanView(id, auth.playerId);
+        if (!view) throw new Error('CLAN_NOT_FOUND');
+        res.json({ success: true, clan: view });
+    } catch (e) { clanError(res, e, 'info'); }
+});
+
+app.post('/api/clan/create', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const name = ClanSystem.validName(req.body.name);
+        if (!name) throw new Error('BAD_NAME');
+        const emblem = req.body.emblem;
+        if (!CLAN_EMBLEMS.includes(emblem)) throw new Error('BAD_EMBLEM');
+        const description = String(req.body.description || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+        const open = req.body.open !== false;
+        const clanId = ClanSystem.newId();
+        const playerRef = db.collection('players').doc(auth.playerId);
+        const nameRef = db.collection('clanNames').doc(name.toLowerCase());
+        const now = Date.now();
+        const out = await db.runTransaction(async (tx) => {
+            const [pDoc, nDoc] = await Promise.all([tx.get(playerRef), tx.get(nameRef)]);
+            if (!pDoc.exists) throw new Error('PLAYER_NOT_FOUND');
+            const pdata = pDoc.data();
+            if (pdata.clan && pdata.clan.id) throw new Error('ALREADY_IN_CLAN');
+            if (nDoc.exists) throw new Error('NAME_TAKEN');
+            const tst = (pdata.progress || {}).tst || 0;
+            if (tst < CLAN_CREATE_COST_TST) throw new Error('NOT_ENOUGH_TST');
+            tx.set(db.collection('clans').doc(clanId), {
+                name, nameLower: name.toLowerCase(), emblem, description, open,
+                leaderId: auth.playerId, memberCount: 1, maxMembers: CLAN_MAX_MEMBERS, createdAt: now,
+                members: { [auth.playerId]: { name: auth.name, role: 'leader', joinedAt: now } }
+            });
+            tx.set(nameRef, { clanId });
+            tx.update(playerRef, { 'progress.tst': tst - CLAN_CREATE_COST_TST, clan: { id: clanId, role: 'leader', joinedAt: now } });
+            ClanSystem.resetMemberCup(tx, auth.playerId, clanId, auth.name, now);
+            return { newTst: tst - CLAN_CREATE_COST_TST };
+        });
+        res.json({ success: true, clanId, ...out });
+    } catch (e) { clanError(res, e, 'create'); }
+});
+
+app.post('/api/clan/join', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const clanId = String(req.body.clanId || '');
+        if (!/^[A-Za-z0-9]{4,20}$/.test(clanId)) throw new Error('CLAN_NOT_FOUND');
+        const viaInvite = !!req.body.invite;
+        const playerRef = db.collection('players').doc(auth.playerId);
+        const clanRef = db.collection('clans').doc(clanId);
+        const now = Date.now();
+        await db.runTransaction(async (tx) => {
+            const [pDoc, cDoc] = await Promise.all([tx.get(playerRef), tx.get(clanRef)]);
+            if (!pDoc.exists) throw new Error('PLAYER_NOT_FOUND');
+            if (!cDoc.exists) throw new Error('CLAN_NOT_FOUND');
+            const pdata = pDoc.data(), c = cDoc.data();
+            if (pdata.clan && pdata.clan.id) throw new Error('ALREADY_IN_CLAN');
+            const until = (pdata.clanLeftAt || 0) + CLAN_REJOIN_COOLDOWN_MS;
+            if (until > now) { const err = new Error('COOLDOWN'); err.until = until; throw err; }
+            if (!c.open && !viaInvite) throw new Error('CLAN_NOT_FOUND');
+            if ((c.memberCount || 0) >= (c.maxMembers || CLAN_MAX_MEMBERS)) throw new Error('CLAN_FULL');
+            tx.update(clanRef, {
+                memberCount: (c.memberCount || 0) + 1,
+                [`members.${auth.playerId}`]: { name: auth.name, role: 'member', joinedAt: now }
+            });
+            tx.update(playerRef, { clan: { id: clanId, role: 'member', joinedAt: now } });
+            ClanSystem.resetMemberCup(tx, auth.playerId, clanId, auth.name, now);
+        });
+        res.json({ success: true, clanId });
+    } catch (e) { clanError(res, e, 'join'); }
+});
+
+// Выход: лидер передаёт роль самому "старому" участнику; последний участник распускает клан
+app.post('/api/clan/leave', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const playerRef = db.collection('players').doc(auth.playerId);
+        const now = Date.now();
+        const out = await db.runTransaction(async (tx) => {
+            const pDoc = await tx.get(playerRef);
+            if (!pDoc.exists) throw new Error('PLAYER_NOT_FOUND');
+            const pclan = pDoc.data().clan;
+            if (!pclan || !pclan.id) throw new Error('NOT_IN_CLAN');
+            const clanRef = db.collection('clans').doc(pclan.id);
+            const cDoc = await tx.get(clanRef);
+            tx.update(playerRef, { clan: null, clanLeftAt: now });
+            if (!cDoc.exists) return { disbanded: true };
+            const c = cDoc.data();
+            const members = { ...(c.members || {}) };
+            delete members[auth.playerId];
+            const rest = Object.entries(members);
+            if (!rest.length) {
+                tx.delete(clanRef);
+                tx.delete(db.collection('clanNames').doc(c.nameLower));
+                return { disbanded: true };
+            }
+            const updates = { memberCount: rest.length, [`members.${auth.playerId}`]: admin.firestore.FieldValue.delete() };
+            if (c.leaderId === auth.playerId) {
+                const [newLeaderId] = rest.sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0))[0];
+                updates.leaderId = newLeaderId;
+                updates[`members.${newLeaderId}.role`] = 'leader';
+                tx.update(db.collection('players').doc(newLeaderId), { 'clan.role': 'leader' });
+            }
+            tx.update(clanRef, updates);
+            return { disbanded: false };
+        });
+        res.json({ success: true, ...out, rejoinAt: now + CLAN_REJOIN_COOLDOWN_MS });
+    } catch (e) { clanError(res, e, 'leave'); }
+});
+
+app.post('/api/clan/kick', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const target = String(req.body.playerId || '');
+        if (!target || target === auth.playerId) throw new Error('NOT_MEMBER');
+        const playerRef = db.collection('players').doc(auth.playerId);
+        await db.runTransaction(async (tx) => {
+            const pDoc = await tx.get(playerRef);
+            const pclan = pDoc.exists && pDoc.data().clan;
+            if (!pclan || !pclan.id) throw new Error('NOT_IN_CLAN');
+            const clanRef = db.collection('clans').doc(pclan.id);
+            const targetRef = db.collection('players').doc(target);
+            const [cDoc, tDoc] = await Promise.all([tx.get(clanRef), tx.get(targetRef)]);
+            if (!cDoc.exists) throw new Error('CLAN_NOT_FOUND');
+            const c = cDoc.data();
+            if (c.leaderId !== auth.playerId) throw new Error('NOT_LEADER');
+            if (!(c.members || {})[target]) throw new Error('NOT_MEMBER');
+            tx.update(clanRef, { memberCount: Math.max(0, (c.memberCount || 1) - 1), [`members.${target}`]: admin.firestore.FieldValue.delete() });
+            // исключённый игрок не получает кулдаун на вступление
+            if (tDoc.exists) tx.update(targetRef, { clan: null });
+        });
+        res.json({ success: true });
+    } catch (e) { clanError(res, e, 'kick'); }
+});
+
+app.post('/api/clan/update', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        const pDoc = await db.collection('players').doc(auth.playerId).get();
+        const pclan = pDoc.exists && pDoc.data().clan;
+        if (!pclan || !pclan.id) throw new Error('NOT_IN_CLAN');
+        const clanRef = db.collection('clans').doc(pclan.id);
+        await db.runTransaction(async (tx) => {
+            const cDoc = await tx.get(clanRef);
+            if (!cDoc.exists) throw new Error('CLAN_NOT_FOUND');
+            if (cDoc.data().leaderId !== auth.playerId) throw new Error('NOT_LEADER');
+            const updates = {};
+            if (typeof req.body.open === 'boolean') updates.open = req.body.open;
+            if (typeof req.body.description === 'string') updates.description = req.body.description.replace(/\s+/g, ' ').trim().slice(0, 120);
+            if (req.body.emblem !== undefined) {
+                if (!CLAN_EMBLEMS.includes(req.body.emblem)) throw new Error('BAD_EMBLEM');
+                updates.emblem = req.body.emblem;
+            }
+            if (Object.keys(updates).length) tx.update(clanRef, updates);
+        });
+        res.json({ success: true });
+    } catch (e) { clanError(res, e, 'update'); }
+});
+
+app.post('/api/clan/claim-cup', async (req, res) => {
+    try {
+        const auth = await clanAuth(req, res); if (!auth) return;
+        await ClanSystem.settle(auth.playerId);
+        const playerRef = db.collection('players').doc(auth.playerId);
+        const result = await db.runTransaction(async (tx) => {
+            const doc = await tx.get(playerRef);
+            if (!doc.exists) throw new Error('PLAYER_NOT_FOUND');
+            const data = doc.data();
+            const progress = data.progress || {};
+            if (!data.clanCupReward) throw new Error('NO_REWARD');
+            const { updates, out } = LeagueRewards.apply(progress, data.clanCupReward);
+            updates.clanCupReward = null;
+            tx.update(playerRef, updates);
+            return {
+                granted: out,
+                newTsp: updates['progress.tsp'] ?? (progress.tsp || 0),
+                newTst: updates['progress.tst'] ?? (progress.tst || 0),
+                incomeBoost: updates['progress.incomeBoost'] || progress.incomeBoost || null
+            };
+        });
+        res.json({ success: true, ...result });
+    } catch (e) { clanError(res, e, 'claim-cup'); }
 });
 
 // Health check (без изменений)

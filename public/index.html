@@ -365,6 +365,9 @@
 </button>
 
 <div class="fixed bottom-6 left-4 z-40 flex flex-col gap-3">
+    <button onclick="ClanUI.open()" title="Клан" class="w-12 h-12 bg-violet-600/90 backdrop-blur rounded-full text-2xl shadow-lg border border-violet-300 flex items-center justify-center transition-transform active:scale-90">
+    🛡️
+</button>
     <button onclick="LeagueUI.open()" title="Лига" class="w-12 h-12 bg-amber-500/90 backdrop-blur rounded-full text-2xl shadow-lg border border-amber-300 flex items-center justify-center transition-transform active:scale-90">
     🏆
 </button>
@@ -549,6 +552,18 @@
             Транзакции защищены сетью TON Blockchain
         </div>
     </div>
+</div>
+
+<!-- =========== КЛАНЫ =========== -->
+<div id="clanModal" class="hidden fixed inset-0 z-[215] bg-slate-950/95 backdrop-blur-xl flex flex-col pt-[calc(var(--tg-header-height,60px)+0.5rem)] pb-[env(safe-area-inset-bottom)]">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+        <div>
+            <div id="clan-title" class="text-xl font-black text-white">🛡️ Кланы</div>
+            <div id="clan-subtitle" class="text-xs text-slate-400">Кубок кланов недели</div>
+        </div>
+        <button onclick="ClanUI.close()" class="w-10 h-10 rounded-full bg-slate-800 text-white text-xl">✕</button>
+    </div>
+    <div id="clan-body" class="flex-1 overflow-y-auto px-4 py-3 space-y-3 no-scrollbar text-white text-sm">Загрузка…</div>
 </div>
 
 <!-- =========== КАРТОЧКА ДЛЯ ШАРИНГА =========== -->
@@ -2836,6 +2851,250 @@ const ShareCard = {
         } finally { this._setBusy(false); }
     }
 };
+
+// ==========================================
+// КЛАНЫ (клиент)
+// ==========================================
+const ClanUI = {
+    state: null, view: 'main', listTab: 'top', list: null, query: '', form: { name: '', emblem: '🚀', description: '', open: true },
+    BOT_LINK: 'https://t.me/DigitalCryptoStore_bot/game',
+    esc(s) { return LeagueUI.esc(s == null ? '' : s); },
+    fmt(n) { return LeagueUI.fmt(n); },
+    async api(path, body = {}) {
+        const initData = SaveSystem._getInitData();
+        if (!initData) throw new Error('Нет авторизации Telegram');
+        const r = await fetch('/api/clan/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, ...body }) });
+        const j = await r.json().catch(() => ({}));
+        if (!j.success) { const e = new Error(j.error || 'Ошибка сервера'); e.code = j.code; e.until = j.until; throw e; }
+        return j;
+    },
+    body() { return document.getElementById('clan-body'); },
+    async open(view) {
+        document.getElementById('clanModal').classList.remove('hidden');
+        this.view = view || 'main';
+        this.body().innerHTML = '<div class="text-slate-400">Загрузка…</div>';
+        await this.refresh();
+    },
+    close() { document.getElementById('clanModal').classList.add('hidden'); },
+    async refresh() {
+        try {
+            try { await ClickBuffer.forceSend(); } catch (e) {}
+            this.state = await this.api('me');
+            if (typeof this.state.tst === 'number') { GameState.tst = this.state.tst; updateUI(); }
+            if (!this.state.clan && this.view === 'main') await this.loadList();
+            this.render();
+        } catch (e) {
+            this.body().innerHTML = `<div class="text-red-400">${this.esc(e.message)}</div>`;
+        }
+    },
+    async loadList() {
+        try { this.list = await this.api('list', { query: this.query }); } catch (e) { this.list = { top: [], clans: [], error: e.message }; }
+    },
+    timeLeft(ts) {
+        const ms = Math.max(0, ts - Date.now());
+        const d = Math.floor(ms / 86400000), h = Math.floor(ms / 3600000) % 24, m = Math.floor(ms / 60000) % 60;
+        return d > 0 ? `${d}д ${h}ч` : `${h}ч ${m}м`;
+    },
+    rewardText(r) {
+        if (!r) return '';
+        return [r.hours ? `💰 ${r.hours} ч дохода` : '', r.boost ? `🚀 ×${r.boost.mult} на ${r.boost.hours} ч` : '', r.tst ? `💎 ${r.tst} TST` : ''].filter(Boolean).join(' · ');
+    },
+    render() {
+        const s = this.state; if (!s) return;
+        document.getElementById('clan-subtitle').textContent = `Кубок кланов · до конца недели ${this.timeLeft(s.weekEndsAt)}`;
+        let html = '';
+        if (s.pendingCupReward) {
+            const r = s.lastCupResult || {};
+            html += `<div class="p-3 rounded-xl bg-emerald-900/40 border border-emerald-500/50">
+                <div class="font-bold">🏆 Итоги кубка: ${r.place ? `клан занял ${r.place} место из ${r.total}` : 'награда'}</div>
+                <div class="text-xs text-slate-300 mt-1">Ваш вклад: ${r.myHours || 0} ч · ${this.rewardText(s.pendingCupReward)}</div>
+                <button onclick="ClanUI.claimCup()" class="mt-2 w-full bg-emerald-500 text-slate-900 font-bold py-2 rounded-lg">Забрать награду</button></div>`;
+        }
+        if (this.view === 'create') html += this.renderCreate();
+        else if (this.view === 'invite') html += this.renderInvite();
+        else if (s.clan) html += this.renderClan();
+        else html += this.renderNoClan();
+        html += this.renderRules();
+        this.body().innerHTML = html;
+        document.getElementById('clan-title').textContent = s.clan ? `${s.clan.emblem} ${s.clan.name}` : '🛡️ Кланы';
+    },
+    clanRow(c, withJoin) {
+        return `<div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700/50">
+            <span class="w-6 text-center font-bold text-slate-400">${c.place || ''}</span>
+            <span class="text-2xl">${this.esc(c.emblem)}</span>
+            <div class="flex-1 min-w-0"><div class="font-bold truncate">${this.esc(c.name)}${c.open ? '' : ' 🔒'}</div>
+                <div class="text-[11px] text-slate-400">👥 ${c.memberCount}/${c.maxMembers} · ${this.fmt(c.points)} очк.</div></div>
+            ${withJoin && c.open && c.memberCount < c.maxMembers ? `<button onclick="ClanUI.join('${c.id}')" class="px-3 py-1.5 rounded-lg bg-violet-600 font-bold text-xs">Вступить</button>` : ''}
+        </div>`;
+    },
+    renderNoClan() {
+        const s = this.state, l = this.list || { top: [], clans: [] };
+        const cooldown = s.rejoinAt > Date.now() ? `<div class="text-xs text-amber-300">Вступить в новый клан можно через ${this.timeLeft(s.rejoinAt)}</div>` : '';
+        const canCreate = (GameState.tst || 0) >= s.createCost;
+        const items = this.listTab === 'top' ? l.top : l.clans;
+        return `<div class="p-4 rounded-2xl bg-gradient-to-br from-violet-700/50 to-indigo-800/40 border border-violet-500/40">
+                <div class="font-black text-lg">Объединяйтесь в кланы</div>
+                <div class="text-xs text-slate-300 mt-1">Каждую неделю кланы соревнуются в кубке. Очки дают часы работы офиса каждого участника, а не размер кошелька.</div>
+                <button onclick="ClanUI.show('create')" class="mt-3 w-full font-bold py-3 rounded-xl ${canCreate ? 'bg-amber-500 text-slate-900' : 'bg-slate-700 text-slate-300'}">Создать клан · ${s.createCost} 💎</button>
+                ${canCreate ? '' : `<div class="text-[11px] text-slate-400 mt-1 text-center">У вас ${Math.floor(GameState.tst || 0)} 💎 — пополнить можно в Банке TST</div>`}
+            </div>
+            ${cooldown}
+            <div class="flex gap-2">
+                <input id="clan-search" value="${this.esc(this.query)}" placeholder="Поиск по названию" class="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white" onkeydown="if(event.key==='Enter')ClanUI.search()">
+                <button onclick="ClanUI.search()" class="px-3 rounded-lg bg-slate-700">🔍</button>
+            </div>
+            <div class="flex gap-2 text-xs font-bold">
+                <button onclick="ClanUI.tab('top')" class="flex-1 py-2 rounded-lg ${this.listTab === 'top' ? 'bg-violet-600' : 'bg-slate-800'}">🏆 Кубок недели</button>
+                <button onclick="ClanUI.tab('open')" class="flex-1 py-2 rounded-lg ${this.listTab === 'open' ? 'bg-violet-600' : 'bg-slate-800'}">${this.query ? '🔍 Найдено' : '🚪 Открытые'}</button>
+            </div>
+            <div class="space-y-1">${(items || []).map(c => this.clanRow(c, true)).join('') || '<div class="text-slate-500 text-center py-4">Пока пусто — создайте первый клан!</div>'}</div>`;
+    },
+    renderCreate() {
+        const s = this.state, f = this.form;
+        return `<div class="space-y-3">
+            <button onclick="ClanUI.show('main')" class="text-slate-400 text-xs">← Назад</button>
+            <div class="font-black text-lg">Новый клан</div>
+            <input id="clan-f-name" maxlength="20" value="${this.esc(f.name)}" placeholder="Название (3–20 символов)" class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white">
+            <div class="text-xs text-slate-400">Эмблема</div>
+            <div class="grid grid-cols-8 gap-1">${s.emblems.map(e => `<button onclick="ClanUI.pickEmblem('${e}')" class="text-2xl py-1 rounded-lg ${e === f.emblem ? 'bg-violet-600' : 'bg-slate-800'}">${e}</button>`).join('')}</div>
+            <input id="clan-f-desc" maxlength="120" value="${this.esc(f.description)}" placeholder="Описание (необязательно)" class="w-full px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-white">
+            <label class="flex items-center gap-2"><input id="clan-f-open" type="checkbox" ${f.open ? 'checked' : ''}> Открытый клан (виден в списке, вступить может любой)</label>
+            <button onclick="ClanUI.create()" class="w-full bg-amber-500 text-slate-900 font-bold py-3 rounded-xl">Создать за ${s.createCost} 💎</button>
+            <div class="text-[11px] text-slate-500 text-center">TST списываются сразу. Если вы выйдете из клана, его возглавит самый давний участник.</div>
+        </div>`;
+    },
+    renderClan() {
+        const s = this.state, c = s.clan, isLeader = s.myRole === 'leader';
+        const cup = c.cup || {};
+        return `<div class="p-4 rounded-2xl bg-gradient-to-br from-violet-700/50 to-indigo-800/40 border border-violet-500/40">
+                <div class="flex items-center gap-3">
+                    <div class="text-5xl">${this.esc(c.emblem)}</div>
+                    <div class="flex-1 min-w-0"><div class="font-black text-xl truncate">${this.esc(c.name)}</div>
+                        <div class="text-xs text-slate-300">${this.esc(c.description || (c.open ? 'Открытый клан' : 'Закрытый клан · вход по приглашению'))}</div></div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+                    <div class="bg-black/30 rounded-lg py-2"><div class="text-lg font-black">${cup.place ? '#' + cup.place : '—'}</div><div class="text-[10px] text-slate-400">место из ${cup.total || 0}</div></div>
+                    <div class="bg-black/30 rounded-lg py-2"><div class="text-lg font-black text-amber-400">${this.fmt(cup.points)}</div><div class="text-[10px] text-slate-400">очки кубка</div></div>
+                    <div class="bg-black/30 rounded-lg py-2"><div class="text-lg font-black">${c.memberCount}/${c.maxMembers}</div><div class="text-[10px] text-slate-400">участники</div></div>
+                </div>
+                <div class="flex gap-2 mt-3">
+                    <button onclick="ClanUI.invite()" class="flex-1 bg-sky-500 font-bold py-2 rounded-lg">📨 Пригласить</button>
+                    <button onclick="ClanUI.showTop()" class="flex-1 bg-slate-800 font-bold py-2 rounded-lg">🏆 Кубок</button>
+                </div>
+                ${isLeader ? `<label class="flex items-center gap-2 mt-3 text-xs"><input type="checkbox" ${c.open ? 'checked' : ''} onchange="ClanUI.setOpen(this.checked)"> Открытый клан (виден в списке)</label>` : ''}
+            </div>
+            <div id="clan-top" class="hidden space-y-1"></div>
+            <div class="font-bold text-slate-300">Участники · вклад за неделю</div>
+            <div class="space-y-1">${c.members.map((m, i) => `
+                <div class="flex items-center gap-3 px-3 py-2 rounded-lg border ${m.isMe ? 'bg-indigo-600/40 border-indigo-400' : 'bg-slate-800/60 border-slate-700/50'}">
+                    <span class="w-6 text-center font-bold text-slate-400">${i + 1}</span>
+                    <span class="flex-1 truncate">${m.role === 'leader' ? '👑 ' : ''}${this.esc(m.name)}${m.isMe ? ' (вы)' : ''}</span>
+                    <span class="text-[11px] text-slate-400">${m.hours} ч</span>
+                    <span class="text-amber-400 font-bold w-14 text-right">${this.fmt(m.points)}</span>
+                    ${isLeader && !m.isMe ? `<button onclick="ClanUI.kick('${m.playerId}', '${this.esc(m.name).replace(/'/g, '')}')" class="text-red-400 px-1">✕</button>` : ''}
+                </div>`).join('')}</div>
+            <button onclick="ClanUI.leave()" class="w-full mt-2 py-2 rounded-lg bg-slate-900 border border-red-900/60 text-red-400 text-xs">Выйти из клана</button>`;
+    },
+    renderInvite() {
+        const c = this.inviteClan;
+        if (!c) return '<div class="text-slate-400">Клан не найден.</div>';
+        const s = this.state;
+        const busy = s.clan ? `<div class="text-xs text-amber-300">Вы уже в клане «${this.esc(s.clan.name)}». Чтобы вступить, сначала выйдите из него.</div>` : '';
+        return `<div class="p-4 rounded-2xl bg-gradient-to-br from-violet-700/50 to-indigo-800/40 border border-violet-500/40 text-center">
+                <div class="text-xs text-slate-300">Вас пригласили в клан</div>
+                <div class="text-6xl my-2">${this.esc(c.emblem)}</div>
+                <div class="font-black text-2xl">${this.esc(c.name)}</div>
+                <div class="text-xs text-slate-300 mt-1">${this.esc(c.description || '')}</div>
+                <div class="text-sm mt-2">👥 ${c.memberCount}/${c.maxMembers} · ${c.cup && c.cup.place ? `#${c.cup.place} в кубке` : 'новый клан'}</div>
+                ${s.clan ? '' : `<button onclick="ClanUI.join('${c.id}', true)" class="mt-3 w-full bg-violet-600 font-bold py-3 rounded-xl">Вступить</button>`}
+            </div>${busy}
+            <button onclick="ClanUI.show('main')" class="w-full text-slate-400 text-xs">Посмотреть другие кланы</button>`;
+    },
+    renderRules() {
+        const s = this.state, r = s.cupRewards || {}, rules = s.cupRules || {};
+        const line = (name, x) => x ? `<div class="flex justify-between gap-2 border-b border-slate-700/50 py-1"><span class="text-slate-300">${name}</span><span class="text-right">${this.rewardText({ hours: x.h, boost: x.boost ? { mult: x.boost[0], hours: x.boost[1] } : null, tst: x.tst })}</span></div>` : '';
+        return `<details class="rounded-xl bg-slate-800/60 border border-slate-700">
+            <summary class="px-3 py-2 font-bold text-amber-300 cursor-pointer">ℹ️ Правила и награды кубка</summary>
+            <div class="px-3 pb-3 text-xs space-y-1">
+                <div class="text-slate-400">Очки клана — сумма «часов работы офиса» участников за неделю × коэффициент лиги (от ×1 до ×2). Новичок и миллионер вносят одинаково за одно и то же время игры.</div>
+                ${line('1 место', r.top1)}${line('2–3 место', r.top3)}${line('4–10 место', r.top10)}${line('Топ-25%', r.top25)}${line('Участие', r.active)}
+                <div class="text-slate-500 pt-1">Награду получают участники с вкладом от ${rules.minHours} ч, вступившие минимум за 48 ч до конца недели. TST-призы — при ${rules.tstMinClans}+ кланах в кубке и ${rules.tstMinActive}+ активных участниках в клане.</div>
+            </div></details>`;
+    },
+    show(view) { this.saveForm(); this.view = view; if (view === 'main' && !this.state.clan && !this.list) { this.loadList().then(() => this.render()); } this.render(); },
+    saveForm() {
+        const n = document.getElementById('clan-f-name'); if (n) this.form.name = n.value;
+        const d = document.getElementById('clan-f-desc'); if (d) this.form.description = d.value;
+        const o = document.getElementById('clan-f-open'); if (o) this.form.open = o.checked;
+    },
+    pickEmblem(e) { this.saveForm(); this.form.emblem = e; this.render(); },
+    async tab(t) { this.listTab = t; this.render(); },
+    async search() { const el = document.getElementById('clan-search'); this.query = el ? el.value.trim() : ''; await this.loadList(); this.listTab = this.query ? 'open' : this.listTab; this.render(); },
+    async act(fn, okMsg) {
+        try { const r = await fn(); if (okMsg) showNotification(okMsg, 'success'); return r; }
+        catch (e) {
+            const msg = e.code === 'COOLDOWN' && e.until ? `Вступить можно через ${this.timeLeft(e.until)}` : e.message;
+            showNotification(msg, 'error'); return null;
+        }
+    },
+    async create() {
+        this.saveForm();
+        const f = this.form;
+        const r = await this.act(() => this.api('create', f), '🛡️ Клан создан!');
+        if (r) { GameState.tst = r.newTst; updateUI(); this.view = 'main'; this.form = { name: '', emblem: '🚀', description: '', open: true }; await this.refresh(); }
+    },
+    async join(id, invite = false) {
+        const r = await this.act(() => this.api('join', { clanId: id, invite }), '🎉 Вы вступили в клан!');
+        if (r) { this.view = 'main'; await this.refresh(); }
+    },
+    async leave() {
+        const c = this.state.clan; if (!c) return;
+        const last = c.memberCount <= 1;
+        if (!confirm(last ? 'Вы последний участник — клан будет распущен. Выйти?' : 'Выйти из клана? Вступить в другой можно будет через 12 ч.')) return;
+        const r = await this.act(() => this.api('leave'), last ? 'Клан распущен' : 'Вы вышли из клана');
+        if (r) { this.list = null; this.view = 'main'; await this.refresh(); }
+    },
+    async kick(pid, name) {
+        if (!confirm(`Исключить ${name}?`)) return;
+        if (await this.act(() => this.api('kick', { playerId: pid }), 'Игрок исключён')) await this.refresh();
+    },
+    async setOpen(open) { if (await this.act(() => this.api('update', { open }), open ? 'Клан открыт' : 'Клан закрыт')) await this.refresh(); },
+    async claimCup() {
+        const r = await this.act(() => this.api('claim-cup'), '🎁 Награда кубка получена!');
+        if (r) { GameState.tsp = r.newTsp; GameState.tst = r.newTst; GameState.incomeBoost = r.incomeBoost; updateUI(); await this.refresh(); }
+    },
+    async showTop() {
+        const box = document.getElementById('clan-top'); if (!box) return;
+        if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+        box.classList.remove('hidden'); box.innerHTML = '<div class="text-slate-400">Загрузка…</div>';
+        this.query = ''; await this.loadList();
+        box.innerHTML = '<div class="font-bold text-slate-300">🏆 Кубок недели</div>' + ((this.list.top || []).map(c => this.clanRow(c, false)).join('') || '<div class="text-slate-500">Пока никто не набрал очков</div>');
+    },
+    invite() {
+        const c = this.state.clan; if (!c) return;
+        const link = `${this.BOT_LINK}?startapp=clan_${c.id}`;
+        const text = `${c.emblem} Вступай в мой клан «${c.name}» в StoreTycoon — вместе заберём кубок недели!`;
+        const url = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+        const tg = window.Telegram?.WebApp;
+        if (tg && typeof tg.openTelegramLink === 'function') tg.openTelegramLink(url); else window.open(url, '_blank');
+    },
+    // Открытие по ссылке-приглашению t.me/...?startapp=clan_<id>
+    async openInvite(clanId) {
+        document.getElementById('clanModal').classList.remove('hidden');
+        this.body().innerHTML = '<div class="text-slate-400">Загрузка…</div>';
+        try {
+            this.state = await this.api('me');
+            this.inviteClan = (await this.api('info', { clanId })).clan;
+        } catch (e) { this.inviteClan = null; }
+        this.view = 'invite';
+        if (this.state) this.render();
+    }
+};
+// Приглашение в клан по start_param
+setTimeout(() => {
+    const sp = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    if (sp && /^clan_[A-Za-z0-9]{4,20}$/.test(sp)) ClanUI.openInvite(sp.slice(5));
+}, 3000);
 // Через несколько секунд после старта проверяем итоги прошлой недели
 setTimeout(async () => { const d = await LeagueUI.fetch(); if (d) LeagueUI.maybeShowResult(d); }, 8000);
 
