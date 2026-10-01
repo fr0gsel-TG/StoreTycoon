@@ -2598,8 +2598,10 @@ const ShareCard = {
         const tier = league && league.tiers ? league.tiers[tierId] : { icon: '🏆', name: 'Недельная лига' };
         const [bgTop, bgBot, neon, accent] = this.THEMES[tierId] || this.THEMES[0];
         const { hero, crew } = this._pickSkins();
-        const [heroImg, crewA, crewB, logo] = await Promise.all([
-            this._img(this.SKIN_IMG[hero]), this._img(this.SKIN_IMG[crew[0]]), this._img(this.SKIN_IMG[crew[1]]), this._img('./logo.png')
+        // Сначала пробуем арт для карточки (card_pose / card_bg), иначе — картинки из магазина и фон из кода
+        const skinImg = async (id) => (await this._img(`./card_pose/${id}.png`)) || (await this._img(this.SKIN_IMG[id]));
+        const [heroImg, crewA, crewB, logo, bgArt] = await Promise.all([
+            skinImg(hero), skinImg(crew[0]), skinImg(crew[1]), this._img('./logo.png'), this._img(`./card_bg/tier${tierId}.jpg`)
         ]);
         const rar = this.RARITY[(this.SKIN_META[hero] || ['', 0])[1]];
         const user = window.Telegram?.WebApp?.initDataUnsafe?.user || {};
@@ -2616,6 +2618,15 @@ const ShareCard = {
         g.addColorStop(0, bgTop); g.addColorStop(1, bgBot);
         c.fillStyle = g; c.fillRect(0, 0, W, H);
 
+        const horizon = 840;
+        if (bgArt) {
+            // Арт-фон: заполняем холст с обрезкой (cover) и слегка затемняем левую часть под панель
+            const s = Math.max(W / bgArt.width, H / bgArt.height);
+            c.drawImage(bgArt, (W - bgArt.width * s) / 2, (H - bgArt.height * s) / 2, bgArt.width * s, bgArt.height * s);
+            const sh = c.createLinearGradient(0, 0, W * 0.6, 0);
+            sh.addColorStop(0, 'rgba(0,0,0,0.45)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+            c.fillStyle = sh; c.fillRect(0, 0, W, H);
+        } else {
         // звёзды/боке
         for (let i = 0; i < 90; i++) {
             const x = rnd() * W, y = rnd() * H * 0.62, r = rnd() * 2.2 + 0.4;
@@ -2625,7 +2636,6 @@ const ShareCard = {
         c.globalAlpha = 1;
 
         // 2. Силуэт города с окнами
-        const horizon = 840;
         let x = -20;
         while (x < W) {
             const bw = 50 + rnd() * 90, bh = 120 + rnd() * 330;
@@ -2657,6 +2667,7 @@ const ShareCard = {
         g = c.createLinearGradient(0, horizon - 60, 0, horizon + 40);
         g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.6, neon); g.addColorStop(1, 'rgba(0,0,0,0)');
         c.globalAlpha = 0.35; c.fillStyle = g; c.fillRect(0, horizon - 60, W, 100); c.globalAlpha = 1;
+        } // конец процедурного фона
 
         // 4. Прожектор за героем
         const hx = 720, footY = 1150;
