@@ -563,15 +563,23 @@
     <div id="league-tiers" class="flex justify-between px-4 py-3 gap-1"></div>
     <div id="league-me" class="mx-4 mb-2 p-3 rounded-xl bg-indigo-600/20 border border-indigo-500/50 text-sm text-white">Загрузка…</div>
     <div class="px-4 pb-1 text-[11px] text-slate-500">Очки IPO = доход за неделю. Топ поднимается в лигу выше, низ таблицы опускается. Итоги — в воскресенье в 23:59 (МСК).</div>
-    <div id="league-list" class="flex-1 overflow-y-auto px-4 pb-6 space-y-1 no-scrollbar"></div>
+    <div id="league-claim" class="hidden mx-4 mb-2"></div>
+    <div class="flex-1 overflow-y-auto px-4 pb-6 no-scrollbar">
+        <details class="mb-2 rounded-xl bg-slate-800/60 border border-slate-700">
+            <summary class="px-3 py-2 text-sm font-bold text-amber-300 cursor-pointer">🎁 Награды этой лиги</summary>
+            <div id="league-rewards" class="px-3 pb-3 space-y-1 text-xs text-slate-200"></div>
+        </details>
+        <div id="league-list" class="space-y-1"></div>
+    </div>
 </div>
 
 <div id="leagueResultModal" class="hidden fixed inset-0 z-[220] bg-black/80 flex items-center justify-center backdrop-blur-md">
     <div class="bg-slate-900 border-2 border-amber-500 rounded-2xl p-6 w-[85%] max-w-sm text-center">
         <div id="league-result-icon" class="text-5xl mb-3">🏆</div>
         <h2 id="league-result-title" class="text-2xl font-bold text-white mb-2">Итоги недели</h2>
-        <p id="league-result-text" class="text-slate-300 mb-6"></p>
-        <button onclick="LeagueUI.closeResult()" class="w-full bg-amber-500 text-slate-900 font-bold py-3 rounded-xl">Отлично!</button>
+        <p id="league-result-text" class="text-slate-300 mb-4"></p>
+        <div id="league-result-reward" class="hidden bg-slate-800 rounded-xl p-3 mb-4 border border-slate-700 text-left text-sm text-white space-y-1"></div>
+        <button id="league-result-btn" onclick="LeagueUI.closeResult()" class="w-full bg-amber-500 text-slate-900 font-bold py-3 rounded-xl">Отлично!</button>
     </div>
 </div>
 
@@ -2236,7 +2244,7 @@ const ClickBuffer = {
         if (GameState.isServerDown) return;
 
         // Рассчитываем и визуально начисляем пассивный доход
-        const passiveIncome = (GameState.autoClicker || 0) * (GameState.incomeMultiplier || 1);
+        const passiveIncome = (GameState.autoClicker || 0) * (GameState.incomeMultiplier || 1) * LeagueUI.boostMult();
         if (passiveIncome > 0) {
             // Мы делим доход на количество тиков в секунду (1000ms / 250ms = 4)
             const incomePerTick = passiveIncome / (1000 / 250);
@@ -2372,6 +2380,7 @@ const LeagueUI = {
         document.getElementById('league-me').innerHTML =
             `<div class="flex justify-between font-bold"><span>Ваше место: ${place || '—'} / ${d.size}</span><span class="text-amber-400">${this.fmt(d.myPoints)} IPO</span></div>
              <div class="text-xs text-slate-300 mt-1">${zone}</div>`;
+        this.renderRewards(d);
         document.getElementById('league-list').innerHTML = d.standings.map(s => {
             const up = s.place <= d.promote, down = d.demote && s.place > d.size - d.demote;
             const cls = s.isMe ? 'bg-indigo-600/40 border-indigo-400' : up ? 'bg-emerald-900/30 border-emerald-700/50' : down ? 'bg-red-900/30 border-red-800/50' : 'bg-slate-800/60 border-slate-700/50';
@@ -2385,7 +2394,7 @@ const LeagueUI = {
     },
     maybeShowResult(d) {
         const r = d && d.lastResult;
-        if (!r || localStorage.getItem('leagueResultSeen') === r.week) return;
+        if (!r || (localStorage.getItem('leagueResultSeen') === r.week && !d.pendingReward)) return;
         localStorage.setItem('leagueResultSeen', r.week);
         const to = d.tiers[r.toTier] || d.tiers[0];
         const icon = r.change === 'up' ? '🚀' : r.change === 'down' ? '📉' : '🏆';
@@ -2394,9 +2403,85 @@ const LeagueUI = {
         document.getElementById('league-result-title').textContent = head;
         document.getElementById('league-result-text').innerHTML =
             `Место на прошлой неделе: <b>${r.place} из ${r.size}</b> (${this.fmt(r.points)} IPO).<br>Ваша лига теперь: <b>${to.icon} ${this.esc(to.name)}</b>`;
+        const box = document.getElementById('league-result-reward');
+        const btn = document.getElementById('league-result-btn');
+        if (d.pendingReward) {
+            box.innerHTML = '<div class="font-bold text-amber-300">🎁 Ваша награда:</div>' + this.rewardLines(d.pendingReward).map(l => `<div>${l}</div>`).join('');
+            box.classList.remove('hidden');
+            btn.textContent = 'Забрать награду';
+            btn.onclick = () => LeagueUI.claim();
+        } else {
+            box.classList.add('hidden');
+            btn.textContent = 'Отлично!';
+            btn.onclick = () => LeagueUI.closeResult();
+        }
         document.getElementById('leagueResultModal').classList.remove('hidden');
     },
-    closeResult() { document.getElementById('leagueResultModal').classList.add('hidden'); }
+    closeResult() { document.getElementById('leagueResultModal').classList.add('hidden'); },
+
+    // ---- Награды ----
+    SKIN_NAMES: { npc4: 'Скин «Сборщик»', npc5: 'Скин «Сеньор» (epic)' },
+    boostMult() {
+        const b = GameState.incomeBoost;
+        return b && b.until > Date.now() && b.mult > 1 ? Math.min(b.mult, 3) : 1;
+    },
+    boostLeft() {
+        const b = GameState.incomeBoost; if (!b) return '';
+        const ms = Math.max(0, b.until - Date.now());
+        const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60;
+        return h > 0 ? `${h}ч${m}м` : `${m}м`;
+    },
+    rewardLines(r, estimate) {
+        const lines = [];
+        if (r.tsp > 0) lines.push(`💰 +${this.fmt(r.tsp)} TSP`);
+        else if (estimate && r.hours > 0) lines.push(`💰 ${r.hours} ч дохода (~${this.fmt(r.hours * 3600 * (GameState.autoClicker || 0))} TSP)`);
+        if (r.boost) lines.push(`🚀 Буст дохода ×${r.boost.mult} на ${r.boost.hours} ч`);
+        if (r.tst > 0) lines.push(`💎 +${r.tst} TST`);
+        if (r.skin) lines.push(`👕 ${this.SKIN_NAMES[r.skin] || r.skin}`);
+        return lines;
+    },
+    renderRewards(d) {
+        const el = document.getElementById('league-rewards');
+        if (el && d.rewardTable) {
+            el.innerHTML = d.rewardTable.filter(r => r.hours !== undefined).map(r =>
+                `<div class="flex justify-between gap-2 border-b border-slate-700/50 py-1"><span class="font-bold text-slate-300 whitespace-nowrap">${this.esc(r.name)}</span><span class="text-right">${this.rewardLines(r, true).join('<br>')}</span></div>`).join('') +
+                `<div class="text-[10px] text-slate-500 pt-1">1–3 места — в группах от 10 игроков. Нужна активность: очки не меньше 10 минут вашего дохода.</div>`;
+        }
+        const claim = document.getElementById('league-claim');
+        if (claim) {
+            if (d.pendingReward) {
+                claim.classList.remove('hidden');
+                claim.innerHTML = `<button onclick="LeagueUI.claim()" class="w-full bg-emerald-500 text-slate-900 font-bold py-3 rounded-xl animate-pulse">🎁 Забрать награду за прошлую неделю</button>`;
+            } else claim.classList.add('hidden');
+        }
+    },
+    async claim() {
+        const initData = SaveSystem._getInitData();
+        if (!initData || this._claiming) return;
+        this._claiming = true;
+        try {
+            try { await ClickBuffer.forceSend(); } catch (e) {}
+            const r = await fetch('/api/league/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) });
+            const j = await r.json();
+            if (!j.success) { showNotification(j.error || 'Не удалось получить награду', 'error'); return; }
+            GameState.tsp = j.newTsp;
+            GameState.tst = j.newTst;
+            GameState.playerSkins = j.playerSkins;
+            GameState.incomeBoost = j.incomeBoost;
+            const g = j.granted || {};
+            const parts = [];
+            if (g.tsp) parts.push(`+${this.fmt(g.tsp)} TSP`);
+            if (g.tst) parts.push(`+${g.tst} TST`);
+            if (g.skin) parts.push('новый скин');
+            if (g.boost) parts.push(`буст ×${g.boost.mult}`);
+            showNotification('🎁 Награда получена: ' + (parts.join(', ') || 'готово'), 'success');
+            if (this.data) { this.data.pendingReward = null; this.renderRewards(this.data); }
+            this.closeResult();
+            updateUI();
+        } catch (e) {
+            showNotification('Сетевая ошибка. Попробуйте снова.', 'error');
+        } finally { this._claiming = false; }
+    }
 };
 // Через несколько секунд после старта проверяем итоги прошлой недели
 setTimeout(async () => { const d = await LeagueUI.fetch(); if (d) LeagueUI.maybeShowResult(d); }, 8000);
@@ -3837,8 +3922,9 @@ function updateUI() {
     const incomeEl = document.getElementById('ui-income');
     if (incomeEl) {
         // Учитываем множитель дохода от событий
-        const currentIncome = GameState.autoClicker * (GameState.incomeMultiplier || 1);
-        incomeEl.textContent = `+${currentIncome.toFixed(1)}/сек`;
+        const boost = (typeof LeagueUI !== 'undefined') ? LeagueUI.boostMult() : 1;
+        const currentIncome = GameState.autoClicker * (GameState.incomeMultiplier || 1) * boost;
+        incomeEl.textContent = `+${currentIncome.toFixed(1)}/сек` + (boost > 1 ? ` 🚀×${boost} ${LeagueUI.boostLeft()}` : '');
     }
 
     const tstEl = document.getElementById('ui-tst');

@@ -229,7 +229,8 @@ app.post('/api/action/sync-income', async (req, res) => {
 
             newAutoClicker = GameFormulas.recalculateGlobalIncome(progress);
             const clickPower = progress.clickPower || 1;
-            const maxAllowed = elapsedSec * (newAutoClicker * MAX_INCOME_MULTIPLIER + clickPower * MAX_CLICKS_PER_SEC);
+            const boostMult = LeagueRewards.activeBoostMult(progress, now);
+            const maxAllowed = elapsedSec * (newAutoClicker * MAX_INCOME_MULTIPLIER * boostMult + clickPower * MAX_CLICKS_PER_SEC);
 
             credited = Math.min(amount, maxAllowed);
             newBalance = (progress.tsp || 0) + credited;
@@ -1285,12 +1286,23 @@ const LeagueSystem = {
             // 1) Итоги прошлой недели (если игрок в ней участвовал)
             let tier = this.clampTier(league.tier);
             let lastResult = league.lastResult || null;
+            let pendingReward = league.pendingReward || null;
+            const progress = playerDoc.data().progress || {};
+            const extraUpdates = {};
             if (league.week && league.groupId) {
                 const snap = await tx.get(db.collection('leagueEntries').where('groupId', '==', league.groupId));
                 const entries = snap.docs.map(d => d.data());
                 const result = this.computeResult(entries, playerId, tier);
                 if (result) {
-                    lastResult = { ...result, week: league.week };
+                    // Незабранную награду позапрошлой недели выдаём автоматически
+                    if (pendingReward) {
+                        Object.assign(extraUpdates, LeagueRewards.apply(progress, pendingReward).updates);
+                    }
+                    const income = GameFormulas.recalculateGlobalIncome(progress) || progress.autoClicker || 0;
+                    const bracket = LeagueRewards.bracketFor({ ...result, minPoints: income * LEAGUE_MIN_ACTIVITY_SEC });
+                    pendingReward = LeagueRewards.build(result.fromTier, bracket, income);
+                    if (pendingReward) pendingReward.week = league.week;
+                    lastResult = { ...result, week: league.week, bracket, reward: pendingReward };
                     tier = result.toTier;
                 }
             }
@@ -1308,8 +1320,8 @@ const LeagueSystem = {
             tx.set(db.collection('leagueEntries').doc(`${week}_${playerId}`), {
                 week, tier, groupId, playerId, name: name || 'Игрок', points: 0, updatedAt: now
             });
-            const newLeague = { week, tier, groupId, name: name || league.name || 'Игрок', lastResult };
-            tx.update(playerRef, { league: newLeague });
+            const newLeague = { week, tier, groupId, name: name || league.name || 'Игрок', lastResult, pendingReward };
+            tx.update(playerRef, { league: newLeague, ...extraUpdates });
             return newLeague;
         });
     },
@@ -1368,11 +1380,183 @@ app.post('/api/league/me', async (req, res) => {
             myPlace: me ? me.place : null,
             myPoints: me ? me.points : 0,
             standings,
-            lastResult: league.lastResult || null
+            lastResult: league.lastResult || null,
+            pendingReward: league.pendingReward || null,
+            rewardTable: LeagueRewards.table(league.tier)
         });
     } catch (error) {
         if (error.message === 'PLAYER_NOT_FOUND') return res.status(404).json({ success: false, error: 'Игрок не найден.' });
         console.error('Ошибка лиги:', error);
+        res.status(500).json({ success: false, error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// ==========================================
+// НАГРАДЫ ЛИГ
+// ==========================================
+// Принципы, чтобы не ломать экономику:
+//  - TSP выдаётся в "часах собственного дохода" игрока (autoClicker на момент итогов),
+//    поэтому награда масштабируется с прогрессом и не обесценивает цены магазина.
+//  - Буст дохода временный, не суммируется (берётся больший множитель / продлевается срок),
+//    и сервер учитывает его в потолке sync-income.
+//  - TST (донатная валюта) — только с лиги «Офисный дата-центр» и выше, малыми порциями.
+//  - Скины — только в двух верхних лигах за топ-места; если скин уже есть — компенсация TST.
+//  - Призовые места (top1/top3) только в группах от LEAGUE_MIN_GROUP_FOR_TOP игроков,
+//    чтобы нельзя было "выиграть" полупустую группу.
+//  - Нужна минимальная активность: очки ≥ LEAGUE_MIN_ACTIVITY_SEC секунд своего дохода.
+const LEAGUE_MIN_GROUP_FOR_TOP = 10;
+const LEAGUE_MIN_GROUP_FOR_PROMO_BRACKET = 5;
+const LEAGUE_MIN_ACTIVITY_SEC = 600;
+const LEAGUE_SKIN_DUPLICATE_TST = 25;
+const LEAGUE_BRACKETS = ['top1', 'top3', 'top10', 'top50', 'active'];
+const LEAGUE_BRACKET_NAMES = { top1: '1 место', top3: '2–3 место', top10: 'Топ-10%', top50: 'Топ-50%', active: 'Участие' };
+// h — часы дохода в TSP, boost — [множитель, часов], tst — кристаллы, skin — id скина
+const LEAGUE_REWARDS = [
+    { // 0 Гаражный стартап
+        top1:  { h: 3, boost: [1.5, 2] },
+        top3:  { h: 2, boost: [1.5, 1] },
+        top10: { h: 1.5 },
+        top50: { h: 1 },
+        active:{ h: 0.5 }
+    },
+    { // 1 Офисный дата-центр
+        top1:  { h: 4, boost: [1.5, 4], tst: 5 },
+        top3:  { h: 3, boost: [1.5, 2] },
+        top10: { h: 2, boost: [1.5, 1] },
+        top50: { h: 1.5 },
+        active:{ h: 0.5 }
+    },
+    { // 2 IT-Гигант
+        top1:  { h: 5, boost: [2, 4], tst: 15 },
+        top3:  { h: 4, boost: [1.5, 4], tst: 10 },
+        top10: { h: 3, boost: [1.5, 2], tst: 5 },
+        top50: { h: 2 },
+        active:{ h: 1 }
+    },
+    { // 3 Кибер-Синдикат
+        top1:  { h: 6, boost: [2, 6], tst: 30, skin: 'npc4' },
+        top3:  { h: 5, boost: [2, 4], tst: 20 },
+        top10: { h: 4, boost: [1.5, 4], tst: 10 },
+        top50: { h: 2, tst: 3 },
+        active:{ h: 1 }
+    },
+    { // 4 Титаны ИИ
+        top1:  { h: 8, boost: [2, 8], tst: 60, skin: 'npc5' },
+        top3:  { h: 6, boost: [2, 6], tst: 40, skin: 'npc4' },
+        top10: { h: 5, boost: [2, 4], tst: 25 },
+        top50: { h: 3, tst: 5 },
+        active:{ h: 1 }
+    }
+];
+
+const LeagueRewards = {
+    bracketFor(result) {
+        const { place, size, points, minPoints } = result;
+        if (!(points > 0) || points < (minPoints || 0)) return null;
+        if (size >= LEAGUE_MIN_GROUP_FOR_TOP && place === 1) return 'top1';
+        if (size >= LEAGUE_MIN_GROUP_FOR_TOP && place <= 3) return 'top3';
+        if (size >= LEAGUE_MIN_GROUP_FOR_PROMO_BRACKET && place <= Math.max(1, Math.floor(size * 0.1))) return 'top10';
+        if (place <= Math.ceil(size * 0.5)) return 'top50';
+        return 'active';
+    },
+    // Конкретная награда (с суммой TSP) для игрока
+    build(tier, bracket, incomePerSec) {
+        const spec = bracket && LEAGUE_REWARDS[tier] && LEAGUE_REWARDS[tier][bracket];
+        if (!spec) return null;
+        return {
+            tier, bracket,
+            tsp: Math.floor((spec.h || 0) * 3600 * Math.max(0, incomePerSec || 0)),
+            hours: spec.h || 0,
+            boost: spec.boost ? { mult: spec.boost[0], hours: spec.boost[1] } : null,
+            tst: spec.tst || 0,
+            skin: spec.skin || null
+        };
+    },
+    // Таблица наград лиги для UI
+    table(tier) {
+        const t = LEAGUE_REWARDS[tier] || {};
+        return LEAGUE_BRACKETS.map(b => ({ bracket: b, name: LEAGUE_BRACKET_NAMES[b], ...(t[b] ? {
+            hours: t[b].h || 0, boost: t[b].boost ? { mult: t[b].boost[0], hours: t[b].boost[1] } : null,
+            tst: t[b].tst || 0, skin: t[b].skin || null } : {}) }));
+    },
+    // Применить награду к progress, вернуть поля для update и итог
+    apply(progress, reward, now = Date.now()) {
+        const updates = {};
+        const out = { tsp: 0, tst: 0, skin: null, skinDuplicateTst: 0, boost: null };
+        if (!reward) return { updates, out };
+        let tst = progress.tst || 0;
+        if (reward.tsp > 0) {
+            updates['progress.tsp'] = (progress.tsp || 0) + reward.tsp;
+            out.tsp = reward.tsp;
+        }
+        if (reward.tst > 0) { tst += reward.tst; out.tst += reward.tst; }
+        if (reward.skin) {
+            const skins = [...(progress.playerSkins || ['npc1'])];
+            if (skins.includes(reward.skin)) {
+                tst += LEAGUE_SKIN_DUPLICATE_TST;
+                out.tst += LEAGUE_SKIN_DUPLICATE_TST;
+                out.skinDuplicateTst = LEAGUE_SKIN_DUPLICATE_TST;
+            } else {
+                skins.push(reward.skin);
+                updates['progress.playerSkins'] = skins;
+                out.skin = reward.skin;
+            }
+        }
+        if (out.tst > 0) updates['progress.tst'] = tst;
+        if (reward.boost) {
+            const cur = progress.incomeBoost || {};
+            const active = cur.until > now;
+            const mult = Math.max(reward.boost.mult, active ? (cur.mult || 1) : 1);
+            const until = Math.max(active ? cur.until : now, now) + reward.boost.hours * 3600000;
+            // Не даём бусту копиться бесконечно: максимум 24 часа вперёд
+            const boost = { mult, until: Math.min(until, now + 24 * 3600000) };
+            updates['progress.incomeBoost'] = boost;
+            out.boost = boost;
+        }
+        return { updates, out };
+    },
+    activeBoostMult(progress, now = Date.now()) {
+        const b = progress && progress.incomeBoost;
+        return b && b.until > now && b.mult > 1 ? Math.min(b.mult, 3) : 1;
+    }
+};
+
+// Забрать награду за прошлую неделю (идемпотентно)
+app.post('/api/league/claim', async (req, res) => {
+    try {
+        const { initData } = req.body;
+        if (!verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN)) {
+            return res.status(403).json({ success: false, error: 'Неверная подпись.' });
+        }
+        const playerId = getPlayerIdFromInitData(initData);
+        if (!playerId) return res.status(400).json({ success: false, error: 'Не удалось получить ID.' });
+        // Сначала убедимся, что итоги прошлой недели подведены
+        await LeagueSystem.ensure(playerId, LeagueSystem.displayName(initData));
+
+        const playerRef = db.collection('players').doc(playerId);
+        const result = await db.runTransaction(async (tx) => {
+            const doc = await tx.get(playerRef);
+            if (!doc.exists) throw new Error('PLAYER_NOT_FOUND');
+            const data = doc.data();
+            const progress = data.progress || {};
+            const pending = data.league && data.league.pendingReward;
+            if (!pending) throw new Error('NO_REWARD');
+            const { updates, out } = LeagueRewards.apply(progress, pending);
+            updates['league.pendingReward'] = null;
+            tx.update(playerRef, updates);
+            return {
+                granted: out,
+                newTsp: updates['progress.tsp'] ?? (progress.tsp || 0),
+                newTst: updates['progress.tst'] ?? (progress.tst || 0),
+                playerSkins: updates['progress.playerSkins'] || progress.playerSkins || ['npc1'],
+                incomeBoost: updates['progress.incomeBoost'] || progress.incomeBoost || null
+            };
+        });
+        res.json({ success: true, ...result });
+    } catch (error) {
+        if (error.message === 'NO_REWARD') return res.status(400).json({ success: false, error: 'Награда уже получена.' });
+        if (error.message === 'PLAYER_NOT_FOUND') return res.status(404).json({ success: false, error: 'Игрок не найден.' });
+        console.error('Ошибка выдачи награды лиги:', error);
         res.status(500).json({ success: false, error: 'Внутренняя ошибка сервера' });
     }
 });
