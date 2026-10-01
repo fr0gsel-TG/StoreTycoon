@@ -551,6 +551,23 @@
     </div>
 </div>
 
+<!-- =========== КАРТОЧКА ДЛЯ ШАРИНГА =========== -->
+<div id="shareCardModal" class="hidden fixed inset-0 z-[230] bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center p-4 pt-[calc(var(--tg-header-height,60px)+0.5rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+    <div class="w-full max-w-sm flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+            <div class="text-lg font-black text-white">📸 Карточка офиса</div>
+            <button onclick="ShareCard.close()" class="w-9 h-9 rounded-full bg-slate-800 text-white">✕</button>
+        </div>
+        <div class="relative rounded-2xl overflow-hidden border border-slate-700 bg-slate-900" style="aspect-ratio: 4 / 5;">
+            <img id="share-card-img" class="w-full h-full object-contain hidden" alt="card">
+            <div id="share-card-loading" class="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">Рисуем карточку…</div>
+        </div>
+        <button id="share-btn-chat" onclick="ShareCard.shareToChat()" class="w-full bg-sky-500 hover:bg-sky-400 text-white font-bold py-3 rounded-xl disabled:opacity-50">📤 Отправить друзьям</button>
+        <button id="share-btn-story" onclick="ShareCard.shareToStory()" class="hidden w-full bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-3 rounded-xl disabled:opacity-50">📖 Опубликовать в истории</button>
+        <div class="text-[11px] text-slate-500 text-center">В карточке — ваша реферальная ссылка: друзья, пришедшие по ней, засчитываются вам.</div>
+    </div>
+</div>
+
 <!-- =========== ЛИГА =========== -->
 <div id="leagueModal" class="hidden fixed inset-0 z-[210] bg-slate-950/95 backdrop-blur-xl flex flex-col pt-[calc(var(--tg-header-height,60px)+0.5rem)] pb-[env(safe-area-inset-bottom)]">
     <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
@@ -558,7 +575,10 @@
             <div id="league-title" class="text-xl font-black text-white">🏆 Лига</div>
             <div id="league-timer" class="text-xs text-slate-400">—</div>
         </div>
-        <button onclick="LeagueUI.close()" class="w-10 h-10 rounded-full bg-slate-800 text-white text-xl">✕</button>
+        <div class="flex gap-2">
+            <button onclick="ShareCard.open()" title="Поделиться" class="h-10 px-3 rounded-full bg-sky-500 text-white text-sm font-bold">📸 Поделиться</button>
+            <button onclick="LeagueUI.close()" class="w-10 h-10 rounded-full bg-slate-800 text-white text-xl">✕</button>
+        </div>
     </div>
     <div id="league-tiers" class="flex justify-between px-4 py-3 gap-1"></div>
     <div id="league-me" class="mx-4 mb-2 p-3 rounded-xl bg-indigo-600/20 border border-indigo-500/50 text-sm text-white">Загрузка…</div>
@@ -580,6 +600,7 @@
         <p id="league-result-text" class="text-slate-300 mb-4"></p>
         <div id="league-result-reward" class="hidden bg-slate-800 rounded-xl p-3 mb-4 border border-slate-700 text-left text-sm text-white space-y-1"></div>
         <button id="league-result-btn" onclick="LeagueUI.closeResult()" class="w-full bg-amber-500 text-slate-900 font-bold py-3 rounded-xl">Отлично!</button>
+        <button onclick="LeagueUI.closeResult(); ShareCard.open()" class="w-full mt-2 bg-slate-800 text-sky-300 font-bold py-2 rounded-xl border border-slate-700">📸 Похвастаться</button>
     </div>
 </div>
 
@@ -2481,6 +2502,210 @@ const LeagueUI = {
         } catch (e) {
             showNotification('Сетевая ошибка. Попробуйте снова.', 'error');
         } finally { this._claiming = false; }
+    }
+};
+
+// ==========================================
+// КАРТОЧКА ДЛЯ ШАРИНГА: офис из игровых спрайтов + статистика
+// ==========================================
+const ShareCard = {
+    W: 1080, H: 1350,
+    dataUrl: null,
+    prepared: null,
+    busy: false,
+    _raf() { return new Promise(r => requestAnimationFrame(() => r())); },
+    _img(src) {
+        return new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = src; });
+    },
+    _rr(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+        c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+    },
+    _fit(c, text, maxW) {
+        let t = String(text);
+        while (t.length > 1 && c.measureText(t).width > maxW) t = t.slice(0, -2) + '…';
+        return t;
+    },
+
+    // Кадрируем все открытые комнаты: временно двигаем камеру, ждём кадр, копируем canvas
+    async captureOffice() {
+        const W = window.innerWidth, H = window.innerHeight, dpr = window.devicePixelRatio || 1;
+        const saved = { x: camera.x, y: camera.y, zoom: camera.zoom };
+        let rooms = (RoomSystem.rooms || []).filter(r => !r.isLocked);
+        if (!rooms.length) rooms = RoomSystem.rooms || [];
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        const add = (gx, gy) => { const p = toIsoWorld(gx, gy); minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); };
+        rooms.forEach(r => { add(r.x, r.y); add(r.x + r.width, r.y); add(r.x, r.y + r.height); add(r.x + r.width, r.y + r.height); });
+        if (!isFinite(minX)) { add(0, 0); add(GameState.gridSize || 20, GameState.gridSize || 20); }
+        // запас сверху под высоту мебели и стен
+        minY -= CONFIG.tileSize * camera.zoom * 2;
+        const side = Math.min(W, H) * 0.96;
+        const k = side / Math.max(maxX - minX, maxY - minY, 1);
+        camera.zoom = Math.max(0.15, Math.min(3, saved.zoom * k));
+        const kk = camera.zoom / saved.zoom;
+        camera.x = W / 2 - ((minX + maxX) / 2) * kk;
+        camera.y = H / 2 - ((minY + maxY) / 2) * kk;
+        await this._raf(); await this._raf();
+        const out = document.createElement('canvas');
+        out.width = out.height = Math.round(side * dpr);
+        out.getContext('2d').drawImage(canvas, (W / 2 - side / 2) * dpr, (H / 2 - side / 2) * dpr, side * dpr, side * dpr, 0, 0, out.width, out.height);
+        camera.x = saved.x; camera.y = saved.y; camera.zoom = saved.zoom;
+        return out;
+    },
+
+    async render() {
+        const office = await this.captureOffice();
+        const league = LeagueUI.data || await LeagueUI.fetch();
+        const logo = await this._img('./logo.png');
+        const user = window.Telegram?.WebApp?.initDataUnsafe?.user || {};
+        const name = user.username ? '@' + user.username : ([user.first_name, user.last_name].filter(Boolean).join(' ') || 'CEO');
+
+        const cv = document.createElement('canvas');
+        cv.width = this.W; cv.height = this.H;
+        const c = cv.getContext('2d');
+        const F = 'Arial, "Noto Sans", sans-serif';
+
+        // Фон
+        const g = c.createLinearGradient(0, 0, this.W, this.H);
+        g.addColorStop(0, '#0f172a'); g.addColorStop(0.55, '#1e1b4b'); g.addColorStop(1, '#0f172a');
+        c.fillStyle = g; c.fillRect(0, 0, this.W, this.H);
+        c.globalAlpha = 0.08; c.strokeStyle = '#818cf8'; c.lineWidth = 2;
+        for (let i = -this.H; i < this.W; i += 60) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i + this.H, this.H); c.stroke(); }
+        c.globalAlpha = 1;
+
+        // Шапка
+        if (logo) c.drawImage(logo, 60, 50, 110, 110);
+        c.fillStyle = '#fff'; c.font = `900 60px ${F}`; c.textBaseline = 'middle';
+        c.fillText('StoreTycoon', logo ? 195 : 60, 88);
+        c.fillStyle = '#a5b4fc'; c.font = `bold 34px ${F}`;
+        c.fillText(this._fit(c, `Офис ${name}`, 800), logo ? 195 : 60, 140);
+
+        // Офис
+        const ox = 60, oy = 200, os = 960;
+        c.save(); this._rr(c, ox, oy, os, 700, 36); c.clip();
+        c.fillStyle = CONFIG.colors.background; c.fillRect(ox, oy, os, 700);
+        // квадратный кадр → вписываем по ширине, центрируем по вертикали
+        c.drawImage(office, 0, office.height * (1 - 700 / os) / 2, office.width, office.height * 700 / os, ox, oy, os, 700);
+        c.restore();
+        c.lineWidth = 6; c.strokeStyle = '#6366f1'; this._rr(c, ox, oy, os, 700, 36); c.stroke();
+
+        // Статистика
+        const income = (GameState.autoClicker || 0) * (GameState.incomeMultiplier || 1) * LeagueUI.boostMult();
+        const devs = (GameState.npcs || []).filter(n => n.id === 'employee_dev').length;
+        const leads = (GameState.npcs || []).filter(n => n.id === 'employee_manager').length;
+        const stats = [
+            ['💰', LeagueUI.fmt(income) + '/сек', 'доход'],
+            ['👨‍💻', String(devs + leads), 'сотрудников'],
+            ['🏢', String(GameState.companyLevel || 1), 'уровень'],
+        ];
+        const sw = 300, sy = 930;
+        stats.forEach((s, i) => {
+            const x = 60 + i * (sw + 30);
+            c.fillStyle = 'rgba(30,41,59,0.9)'; this._rr(c, x, sy, sw, 150, 28); c.fill();
+            c.strokeStyle = 'rgba(99,102,241,0.5)'; c.lineWidth = 3; c.stroke();
+            c.textAlign = 'center';
+            c.font = `56px ${F}`; c.fillText(s[0], x + sw / 2, sy + 45);
+            c.fillStyle = '#fbbf24'; c.font = `bold 40px ${F}`; c.fillText(this._fit(c, s[1], sw - 20), x + sw / 2, sy + 98);
+            c.fillStyle = '#94a3b8'; c.font = `26px ${F}`; c.fillText(s[2], x + sw / 2, sy + 132);
+            c.textAlign = 'left';
+        });
+
+        // Лига
+        const ly = 1110;
+        const lg = c.createLinearGradient(60, ly, 1020, ly);
+        lg.addColorStop(0, '#f59e0b'); lg.addColorStop(1, '#d97706');
+        c.fillStyle = lg; this._rr(c, 60, ly, 960, 130, 30); c.fill();
+        c.fillStyle = '#0f172a';
+        if (league && league.tiers) {
+            const t = league.tiers[league.tier] || league.tiers[0];
+            c.font = `64px ${F}`; c.fillText(t.icon, 90, ly + 66);
+            c.font = `900 42px ${F}`; c.fillText(this._fit(c, t.name, 520), 180, ly + 48);
+            c.font = `bold 30px ${F}`;
+            c.fillText(`Место ${league.myPlace || '—'} из ${league.size} · ${LeagueUI.fmt(league.myPoints)} IPO`, 180, ly + 94);
+            const r = league.lastResult;
+            if (r && r.change === 'up') {
+                c.textAlign = 'right'; c.font = `900 34px ${F}`; c.fillText('🚀 Повышение!', 990, ly + 66); c.textAlign = 'left';
+            }
+        } else {
+            c.font = `900 42px ${F}`; c.fillText('🏆 Недельная лига', 90, ly + 66);
+        }
+
+        // Подвал
+        c.fillStyle = '#c7d2fe'; c.font = `bold 32px ${F}`; c.textAlign = 'center';
+        c.fillText('Построй свой IT-офис 👉 @DigitalCryptoStore_bot', this.W / 2, 1300);
+        c.textAlign = 'left';
+
+        return cv.toDataURL('image/jpeg', 0.88);
+    },
+
+    async open() {
+        const modal = document.getElementById('shareCardModal');
+        const img = document.getElementById('share-card-img');
+        const loading = document.getElementById('share-card-loading');
+        modal.classList.remove('hidden');
+        img.classList.add('hidden'); loading.classList.remove('hidden'); loading.textContent = 'Рисуем карточку…';
+        this.prepared = null;
+        const tg = window.Telegram?.WebApp;
+        const storyOk = !!(tg && typeof tg.isVersionAtLeast === 'function' && tg.isVersionAtLeast('7.8') && typeof tg.shareToStory === 'function');
+        document.getElementById('share-btn-story').classList.toggle('hidden', !storyOk);
+        try {
+            this.dataUrl = await this.render();
+            img.src = this.dataUrl;
+            img.classList.remove('hidden'); loading.classList.add('hidden');
+        } catch (e) {
+            console.error('ShareCard render error', e);
+            loading.textContent = 'Не удалось нарисовать карточку 😔';
+        }
+    },
+    close() { document.getElementById('shareCardModal').classList.add('hidden'); },
+
+    // Загружаем карточку на сервер один раз на открытие окна
+    async prepare() {
+        if (this.prepared) return this.prepared;
+        if (!this.dataUrl) throw new Error('NO_CARD');
+        const initData = SaveSystem._getInitData();
+        const r = await fetch('/api/share/prepare', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData, image: this.dataUrl }) });
+        const j = await r.json().catch(() => ({}));
+        if (!j.success) throw new Error(j.error || 'Ошибка сервера');
+        this.prepared = j;
+        return j;
+    },
+    _setBusy(b) {
+        this.busy = b;
+        ['share-btn-chat', 'share-btn-story'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = b; });
+    },
+    async shareToChat() {
+        if (this.busy) return;
+        this._setBusy(true);
+        try {
+            const p = await this.prepare();
+            const tg = window.Telegram?.WebApp;
+            if (p.preparedId && tg && typeof tg.shareMessage === 'function' && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
+                tg.shareMessage(p.preparedId, (ok) => { if (ok) showNotification('🎉 Карточка отправлена!', 'success'); });
+            } else {
+                // Старый клиент Telegram: ссылка + текст, сама картинка уже лежит в чате с ботом
+                const url = `https://t.me/share/url?url=${encodeURIComponent(p.referralLink)}&text=${encodeURIComponent(p.caption)}`;
+                if (tg && typeof tg.openTelegramLink === 'function') tg.openTelegramLink(url); else window.open(url, '_blank');
+                showNotification('Картинка карточки отправлена в чат с ботом — её можно переслать', 'info');
+            }
+        } catch (e) {
+            showNotification(e.message === 'NO_CARD' ? 'Карточка ещё рисуется…' : e.message, 'error');
+        } finally { this._setBusy(false); }
+    },
+    async shareToStory() {
+        if (this.busy) return;
+        this._setBusy(true);
+        try {
+            const p = await this.prepare();
+            const tg = window.Telegram?.WebApp;
+            tg.shareToStory(location.origin + p.imageUrl, {
+                text: p.caption,
+                widget_link: { url: p.referralLink, name: 'Играть' }
+            });
+        } catch (e) {
+            showNotification(e.message === 'NO_CARD' ? 'Карточка ещё рисуется…' : e.message, 'error');
+        } finally { this._setBusy(false); }
     }
 };
 // Через несколько секунд после старта проверяем итоги прошлой недели
