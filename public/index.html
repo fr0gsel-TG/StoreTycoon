@@ -1703,12 +1703,12 @@ function checkDirectReferral() {
         const referrerId = startParam.replace('ref_', '');
         const userId = tg?.initDataUnsafe?.user?.id;
 
-        if (userId && referrerId && userId.toString() !== referrerId.toString()) {
-            // Отправляем запрос на сервер, чтобы пометить реферала
+        if (userId && referrerId && userId.toString() !== referrerId.toString() && tg?.initData) {
+            // Отправляем подписанный initData: сервер сам достанет userId и start_param
             fetch('/api/handle-start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId, referrerId })
+                body: JSON.stringify({ initData: tg.initData })
             })
             .then(res => res.json())
             .then(data => console.log('Direct referral registered:', data))
