@@ -1566,17 +1566,30 @@ checkAllQuestsProgress() {
                 }
             },
             
-            updateWorkers() {
+            // Точка "у кофемашины": перед аппаратом, а не внутри спрайта
+            getCoffeeSpot(machine) {
+                const room = RoomSystem.getRoomAt(machine.x, machine.y);
+                let tx = machine.x + 0.5;
+                let ty = machine.y + 1.35;
+                if (room) {
+                    tx = Math.max(room.x + 0.8, Math.min(room.x + room.width - 0.8, tx));
+                    ty = Math.max(room.y + 0.8, Math.min(room.y + room.height - 0.8, ty));
+                }
+                return { x: tx, y: ty };
+            },
+
+            // dt — секунды с прошлого кадра. Все скорости ниже — "в секунду",
+            // поэтому поведение не зависит от FPS устройства.
+            updateWorkers(dt = 1 / 60) {
                 GameState.npcs.forEach(npc => {
-                    // Новая логика для перехода между комнатами
+                    // Team Lead не сидит за столом — им управляет updateTeamLeads()
+                    if (npc.id === 'employee_manager') return;
+
+                    const distToTarget = Math.hypot(npc.targetX - npc.x, npc.targetY - npc.y);
+
+                    // Переход между комнатами
                     if (npc.state === 'going_to_room') {
-                        const dist = Math.sqrt(
-                            Math.pow(npc.targetX - npc.x, 2) + 
-                            Math.pow(npc.targetY - npc.y, 2)
-                        );
-                        
-                        if (dist < 0.3) {
-                            // Достигли входа в комнату, теперь идем к рабочему месту
+                        if (distToTarget < 0.3) {
                             if (npc.targetWorkstation) {
                                 npc.state = 'going_to_work';
                                 npc.targetX = npc.targetWorkstation.x + 0.5;
@@ -1586,91 +1599,65 @@ checkAllQuestsProgress() {
                             }
                         }
                     }
-                    
-                    // 1. Logic for IDLE state
-                    if (npc.state === 'idle') {
-                        if (Math.random() < 0.05) {
-                            const workstation = this.findAvailableWorkstation();
-                            if (workstation) {
-                                this.assignToWorkstation(npc, workstation);
-                            } else {
-                                // Wander around if no work
-                                const room = RoomSystem.getRoomAt(Math.floor(npc.x), Math.floor(npc.y));
-                                if (room) {
-                                    // Блуждаем только в пределах комнаты
-                                    npc.targetX = Math.max(room.x + 1, Math.min(room.x + room.width - 2, npc.x + (Math.random() * 4 - 2)));
-                                    npc.targetY = Math.max(room.y + 1, Math.min(room.y + room.height - 2, npc.y + (Math.random() * 4 - 2)));
-                                }
-                            }
-                        }
-                    }
-                    
-                    // 2. Logic for COMMUTE (Going to work)
-                    else if (npc.state === 'going_to_work') {
-                        const dist = Math.sqrt(
-                            Math.pow(npc.targetX - npc.x, 2) + 
-                            Math.pow(npc.targetY - npc.y, 2)
-                        );
-                        
-                        // If arrived at desk
-                        if (dist < 0.3 && npc.targetWorkstation) {
-                            npc.state = 'working';
-                            npc.x = npc.targetWorkstation.x + 0.5; // Snap to chair
-                            npc.y = npc.targetWorkstation.y + 0.5;
-                        }
-                    }
-                    
-                    // 3. Logic for WORKING
-                    else if (npc.state === 'working') {
-                        // Increase fatigue
-                        npc.fatigue = Math.min(100, npc.fatigue + 0.05);
-                        
-                        // === NEW: Increase Tech Debt slowly while working ===
-                        if (Math.random() < 0.005) { // Small chance every frame
-                            GameState.techDebt = Math.min(100, GameState.techDebt + 0.5);
-                            updateTechDebtUI();
-                        }
 
-                        // If too tired, go rest
-                        if (npc.fatigue >= 80) {
+                    // 1. IDLE: ищем свободный стол (блуждание — в updateNPCs, с паузами)
+                    else if (npc.state === 'idle') {
+                        npc.fatigue = Math.max(0, npc.fatigue - NPC_TUNING.idleRecoveryPerSec * dt);
+                        if (Math.random() < 0.02) {
+                            const workstation = this.findAvailableWorkstation();
+                            if (workstation) this.assignToWorkstation(npc, workstation);
+                        }
+                    }
+
+                    // 2. Идём к столу
+                    else if (npc.state === 'going_to_work') {
+                        if (distToTarget < 0.3 && npc.targetWorkstation) {
+                            npc.state = 'working';
+                            npc.x = npc.targetX = npc.targetWorkstation.x + 0.5;
+                            npc.y = npc.targetY = npc.targetWorkstation.y + 0.5;
+                        }
+                    }
+
+                    // 3. Работаем — копим усталость (техдолг теперь считает TechDebtSystem)
+                    else if (npc.state === 'working') {
+                        npc.fatigue = Math.min(100, npc.fatigue + NPC_TUNING.fatiguePerSec * dt);
+
+                        if (npc.fatigue >= NPC_TUNING.fatigueThreshold) {
                             this.releaseWorkstation(npc.currentWorkstation);
-                            
-                            // Try to find coffee
                             const coffeeMachine = this.findNearestCoffeeMachine(npc);
-                            
+
                             if (coffeeMachine) {
+                                const spot = this.getCoffeeSpot(coffeeMachine);
                                 npc.state = 'going_to_coffee';
-                                npc.targetX = coffeeMachine.x + 0.5;
-                                npc.targetY = coffeeMachine.y + 0.5;
+                                npc.targetX = spot.x;
+                                npc.targetY = spot.y;
                                 showNotification(`${npc.name} идет за кофе`, 'info');
                             } else {
-                                npc.state = 'resting'; // Just stand there if no coffee machine
-                                npc.targetX = npc.x + (Math.random() * 2 - 1);
-                                npc.targetY = npc.y + (Math.random() * 2 - 1);
+                                // Кофемашины нет — отдыхает на месте, но дольше
+                                npc.state = 'resting';
+                                npc.restingWithoutCoffee = true;
+                                npc.targetX = npc.x;
+                                npc.targetY = npc.y;
                             }
                         }
                     }
 
-                    // 4. Logic for GOING TO COFFEE
+                    // 4. Идём за кофе
                     else if (npc.state === 'going_to_coffee') {
-                        const dist = Math.sqrt(
-                            Math.pow(npc.targetX - npc.x, 2) + 
-                            Math.pow(npc.targetY - npc.y, 2)
-                        );
-                        
-                        if (dist < 0.5) {
-                            npc.state = 'resting'; // Start drinking
+                        if (distToTarget < 0.25) {
+                            npc.state = 'resting';
+                            npc.restingWithoutCoffee = false;
                         }
                     }
-                    
-                    // 5. Logic for RESTING (Drinking coffee)
+
+                    // 5. Отдыхаем
                     else if (npc.state === 'resting') {
-                        // Recover faster
-                        npc.fatigue = Math.max(0, npc.fatigue - 0.5);
-                        
-                        // Back to work when rested
+                        const rate = npc.restingWithoutCoffee ? NPC_TUNING.restNoCoffeePerSec : NPC_TUNING.restCoffeePerSec;
+                        npc.fatigue = Math.max(0, npc.fatigue - rate * dt);
                         if (npc.fatigue <= 0) {
                             npc.state = 'idle';
+                            npc.restingWithoutCoffee = false;
+                            npc.idleUntil = Date.now() + 500;
                         }
                     }
                 });
@@ -1764,7 +1751,7 @@ const SaveSystem = {
         companyLevel: GameState.companyLevel,
         limits: GameState.limits,
         roomPrices: GameState.roomPrices,
-        objects: GameState.objects,
+        objects: GameState.objects.map(({ currentWorker, isOccupied, ...rest }) => rest),
         npcs: GameState.npcs.map(n => ({ id: n.id, name: n.name, x: n.x, y: n.y, state: n.state, currentWorkstation: n.currentWorkstation ? { x: n.currentWorkstation.x, y: n.currentWorkstation.y, id: n.currentWorkstation.id } : null })),
         
         // --- ОБНОВЛЕННЫЕ И ДОБАВЛЕННЫЕ ПОЛЯ ---
@@ -2639,6 +2626,14 @@ function toIso(gx, gy, z = 0) {
             ctx.fillText('☕', 0, height/4);
         }
 
+        // Вертикальное положение спрайтов: смещение центра спрайта от верхнего угла
+        // тайла, в долях размера тайла. Больше — ниже (ближе к полу). Подстройте при необходимости.
+        const SPRITE_GROUND = {
+            workstation: 0.35,   // было -0.1 — стол "висел" над тайлом
+            coffee_machine: 0.6, // было 0
+            whiteboardDepth: 0.45 // доска стоит посередине тайла, а не на задней кромке
+        };
+
         // --- РЕНДЕРЕРЫ ОБЪЕКТОВ ---
         const Renderers = {
 
@@ -2649,7 +2644,7 @@ function toIso(gx, gy, z = 0) {
                 const height = ts * 1.2;
                 
                 ctx.save();
-                ctx.translate(iso.x, iso.y - ts * 0.1);
+                ctx.translate(iso.x, iso.y + ts * SPRITE_GROUND.workstation);
                 
                 // Спрайт или запасной вариант
                 if (workstationSprite && isWorkstationSpriteLoaded && workstationSprite.complete) {
@@ -2681,17 +2676,11 @@ function toIso(gx, gy, z = 0) {
             // Спрайт сервера или запасной вариант
             if (serverSprite && isServerSpriteLoaded && serverSprite.complete) {
                 try {
-                    console.log('Отрисовываем спрайт сервера');
                     
                     // Получаем оригинальные размеры изображения
                     const originalWidth = serverSprite.naturalWidth || serverSprite.width;
                     const originalHeight = serverSprite.naturalHeight || serverSprite.height;
                     
-                    console.log('Server sprite dimensions:', {
-                        originalWidth,
-                        originalHeight,
-                        aspectRatio: originalWidth / originalHeight
-                    });
                     
                     // Вычисляем пропорции для максимальной высоты
                     const maxHeight = ts * 1.8; // Серверы выше
@@ -2711,7 +2700,6 @@ function toIso(gx, gy, z = 0) {
                     drawFallbackServer(ctx, width, height, type, obj);
                 }
             } else {
-                console.log('Используем запасной вариант отрисовки сервера');
                 drawFallbackServer(ctx, width, height, type, obj);
             }
             
@@ -2773,6 +2761,18 @@ npc: (npc, type) => {
     // --- КОНЕЦ НОВОЙ ЛОГИКИ ---
 
     // Проверяем, что спрайт загружен и готов к отрисовке
+    // Роль сотрудника: цветное кольцо под ногами (синий — Dev, фиолетовый — Team Lead)
+    const isLead = npc.id === 'employee_manager';
+    ctx.save();
+    ctx.strokeStyle = isLead ? 'rgba(168, 85, 247, 0.95)' : 'rgba(59, 130, 246, 0.85)';
+    ctx.fillStyle = isLead ? 'rgba(168, 85, 247, 0.18)' : 'rgba(59, 130, 246, 0.12)';
+    ctx.lineWidth = Math.max(1.5, 2.5 * camera.zoom);
+    ctx.beginPath();
+    ctx.ellipse(iso.x, iso.y + ts * 0.55, ts * 0.38, ts * 0.19, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
     if (currentSprite && currentSprite.complete && currentSprite.naturalHeight !== 0) {
         ctx.save();
         ctx.translate(iso.x, iso.y - ts * 0.1);
@@ -2783,7 +2783,7 @@ npc: (npc, type) => {
             const workTilt = Math.sin(Date.now() / 600) * 0.05;
             ctx.translate(0, workFloat);
             ctx.rotate(workTilt);
-        } else if (npc.state === 'going_to_work' || npc.state === 'going_to_room') {
+        } else if (npc._moving) {
             const walkBounce = Math.abs(Math.sin(Date.now() / 200)) * 4;
             const walkSway = Math.sin(Date.now() / 150) * 2;
             ctx.translate(walkSway, -walkBounce);
@@ -2823,8 +2823,27 @@ npc: (npc, type) => {
         drawVoxel(npc.x + 0.25, npc.y + 0.25, 0.6, 0.5, 0.5, 0.6, shadeColor(stateColor, -10));
     }
     
-    // Полоска усталости (остается без изменений)
-    if (npc.fatigue > 30) {
+    // Бейдж Team Lead над головой + индикатор действия
+    if (isLead) {
+        const by = iso.y - ts * 1.0;
+        const label = npc.state === 'fixing_bug' || npc.state === 'repairing_server' ? '🔧 TL' : '👑 TL';
+        ctx.save();
+        ctx.font = `bold ${Math.max(9, Math.round(11 * camera.zoom))}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const w = ctx.measureText(label).width + 10;
+        const h = Math.max(14, 16 * camera.zoom);
+        ctx.fillStyle = 'rgba(88, 28, 135, 0.9)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(iso.x - w / 2, by - h / 2, w, h, h / 2); else ctx.rect(iso.x - w / 2, by - h / 2, w, h);
+        ctx.fill();
+        ctx.fillStyle = '#f5f3ff';
+        ctx.fillText(label, iso.x, by + 1);
+        ctx.restore();
+    }
+
+    // Полоска усталости
+    if (npc.id !== 'employee_manager' && npc.fatigue > 30) {
         const barWidth = 30 * camera.zoom;
         const barHeight = 4 * camera.zoom;
         const fatiguePercent = npc.fatigue / 100;
@@ -2846,7 +2865,7 @@ npc: (npc, type) => {
             const ts = CONFIG.tileSize * camera.zoom;
             
             ctx.save();
-            ctx.translate(iso.x, iso.y - ts * 0);
+            ctx.translate(iso.x, iso.y + ts * SPRITE_GROUND.coffee_machine);
             
             // Спрайт кофемашины или запасной вариант
             if (coffeeMachineSprite && isCoffeeMachineSpriteLoaded && coffeeMachineSprite.complete) {
@@ -2855,11 +2874,6 @@ npc: (npc, type) => {
                     const originalWidth = coffeeMachineSprite.naturalWidth || coffeeMachineSprite.width;
                     const originalHeight = coffeeMachineSprite.naturalHeight || coffeeMachineSprite.height;
                     
-                    console.log('Coffee machine sprite dimensions:', {
-                        originalWidth,
-                        originalHeight,
-                        tileSize: ts
-                    });
                     
                     // Задаем максимальную высоту (относительно размера плитки)
                     const maxHeight = ts * 0.8;
@@ -2899,9 +2913,10 @@ npc: (npc, type) => {
     },
             
             board: (obj, type) => {
-                drawVoxel(obj.x, obj.y, 0, 1, 0.1, 1.5, '#f8fafc');
+                const by = obj.y + SPRITE_GROUND.whiteboardDepth;
+                drawVoxel(obj.x, by, 0, 1, 0.1, 1.5, '#f8fafc');
                 
-                const iso = toIso(obj.x + 0.5, obj.y + 0.05, 1.0);
+                const iso = toIso(obj.x + 0.5, by + 0.05, 1.0);
                 ctx.fillStyle = '#0f172a';
                 ctx.font = 'bold 12px Arial';
                 ctx.textAlign = 'center';
@@ -2913,41 +2928,111 @@ npc: (npc, type) => {
         };
 
         // ==================== СИСТЕМА NPC ====================
+        // Все настройки движения и усталости в одном месте (единицы — тайлы/сек, %/сек)
+        const NPC_TUNING = {
+            devSpeed: 1.2,            // Junior Dev, тайлов в секунду
+            managerSpeed: 1.0,        // Team Lead в обычном режиме
+            managerHuntSpeed: 1.6,    // Team Lead, идущий к багу/серверу
+            fatiguePerSec: 1.3,       // работа: 0 → 80% примерно за минуту
+            fatigueThreshold: 80,
+            restCoffeePerSec: 12,     // у кофемашины ~7 сек отдыха
+            restNoCoffeePerSec: 4,    // без кофемашины ~20 сек
+            idleRecoveryPerSec: 2,
+            idlePauseMin: 1500,       // пауза между шагами при блуждании, мс
+            idlePauseMax: 4000
+        };
+
+        // NPC с сервера приходят "голыми" ({id, name, x, y, state}) — без скорости,
+        // усталости и цели. Из-за этого Team Lead летал со скоростью 2 тайла/кадр,
+        // а fatigue был NaN и сотрудники никогда не шли за кофе.
+        function hydrateNpc(npc) {
+            if (npc._hydrated) return npc;
+            if (typeof npc.fatigue !== 'number' || !Number.isFinite(npc.fatigue)) npc.fatigue = 0;
+            if (typeof npc.targetX !== 'number' || !Number.isFinite(npc.targetX)) npc.targetX = npc.x;
+            if (typeof npc.targetY !== 'number' || !Number.isFinite(npc.targetY)) npc.targetY = npc.y;
+            npc.speed = npc.id === 'employee_manager' ? NPC_TUNING.managerSpeed : NPC_TUNING.devSpeed;
+            if (!npc.state || ['moving', 'fixing_bug', 'hunting_bug'].includes(npc.state)) npc.state = 'idle';
+            npc.idleUntil = 0;
+            // Team Lead не занимает стол (старые сохранения могли посадить его работать)
+            if (npc.id === 'employee_manager') {
+                if (npc.currentWorkstation) {
+                    npc.currentWorkstation.isOccupied = false;
+                    npc.currentWorkstation.currentWorker = null;
+                    npc.currentWorkstation = null;
+                }
+                if (npc.state === 'working' || npc.state === 'going_to_work' || npc.state === 'resting' || npc.state === 'going_to_coffee') npc.state = 'idle';
+            }
+            npc._hydrated = true;
+            return npc;
+        }
+
+        // Ответ сервера (newObjects/newNpcs) — полный список. Если наш локальный
+        // список — его начало, просто дописываем новые элементы, сохраняя
+        // позиции, цели и занятые столы. Раньше массивы целиком заменялись, и
+        // все NPC "телепортировались" и дёргались после каждой покупки.
+        function mergeServerList(localList, serverList, hydrate) {
+            if (!Array.isArray(serverList)) return localList;
+            const local = localList || [];
+            const isPrefix = local.length <= serverList.length &&
+                local.every((item, i) => item.id === serverList[i].id && (item.renderType === 'npc' || hydrate || (item.x === serverList[i].x && item.y === serverList[i].y)));
+            if (!isPrefix) return hydrate ? serverList.map(hydrate) : serverList;
+            for (let i = local.length; i < serverList.length; i++) {
+                local.push(hydrate ? hydrate(serverList[i]) : serverList[i]);
+            }
+            return local;
+        }
+
+        function pickIdleTarget(npc) {
+            const room = RoomSystem.getRoomAt(Math.floor(npc.x), Math.floor(npc.y));
+            if (!room) return;
+            npc.targetX = Math.max(room.x + 1, Math.min(room.x + room.width - 1.5, npc.x + (Math.random() * 4 - 2)));
+            npc.targetY = Math.max(room.y + 1, Math.min(room.y + room.height - 1.5, npc.y + (Math.random() * 4 - 2)));
+        }
+
         function updateNPCs() {
             const now = Date.now();
-            const delta = Math.min((now - (GameState.lastNpcUpdate || now)) / 16, 2);
+            const dt = Math.min((now - (GameState.lastNpcUpdate || now)) / 1000, 0.1); // секунды
             GameState.lastNpcUpdate = now;
 
-            // 1. Run the AI (Decide where to go)
-            WorkSystem.updateWorkers();
+            GameState.npcs.forEach(hydrateNpc);
 
-            // 2. Physics (Actually move pixels)
+            // 1. ИИ: решаем, куда идти
+            WorkSystem.updateWorkers(dt);
+
+            // 2. Физика: плавно двигаем к цели
             GameState.npcs.forEach(npc => {
                 const dx = npc.targetX - npc.x;
                 const dy = npc.targetY - npc.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                // Movement Speed
-                const moveSpeed = (npc.speed || 0.02) * delta;
+                const stationary = npc.state === 'working' || npc.state === 'fixing_bug' || npc.state === 'repairing_server';
+                const speed = npc.state === 'hunting_bug' || npc.state === 'fixing_server'
+                    ? NPC_TUNING.managerHuntSpeed
+                    : (npc.speed || NPC_TUNING.devSpeed);
+                const step = speed * dt;
 
-                if (dist > 0.05 && npc.state !== 'working') {
-                    const angle = Math.atan2(dy, dx);
-                    npc.x += Math.cos(angle) * moveSpeed;
-                    npc.y += Math.sin(angle) * moveSpeed;
-                    
-                    // Animation: Increment frame only when moving
-                    npc.frame = (npc.frame || 0) + 0.15 * delta;
+                if (!stationary && dist > 0.02) {
+                    if (dist <= step) {
+                        // Доходим ровно до цели — без перелёта и "дрожания" вокруг точки
+                        npc.x = npc.targetX;
+                        npc.y = npc.targetY;
+                    } else {
+                        npc.x += (dx / dist) * step;
+                        npc.y += (dy / dist) * step;
+                    }
+                    npc._moving = true;
+                    npc.frame = (npc.frame || 0) + 9 * dt;
                 } else {
-                    // Standing still
-                    npc.frame = 0; 
-                    
-                    // If they are idle and reached target, give them a new random target eventually
-                    if (npc.state === 'idle' && Math.random() < 0.01) {
-                        const room = RoomSystem.getRoomAt(Math.floor(npc.x), Math.floor(npc.y));
-                        if (room) {
-                            // Блуждаем только в пределах комнаты
-                            npc.targetX = Math.max(room.x + 1, Math.min(room.x + room.width - 2, npc.x + (Math.random() * 6 - 3)));
-                            npc.targetY = Math.max(room.y + 1, Math.min(room.y + room.height - 2, npc.y + (Math.random() * 6 - 3)));
+                    npc._moving = false;
+                    npc.frame = 0;
+
+                    // Блуждание в простое: новая цель только после паузы
+                    if (npc.state === 'idle') {
+                        if (!npc.idleUntil) {
+                            npc.idleUntil = now + NPC_TUNING.idlePauseMin + Math.random() * (NPC_TUNING.idlePauseMax - NPC_TUNING.idlePauseMin);
+                        } else if (now >= npc.idleUntil) {
+                            npc.idleUntil = 0;
+                            pickIdleTarget(npc);
                         }
                     }
                 }
@@ -3025,70 +3110,141 @@ npc: (npc, type) => {
             });
         }
 
-        // ==================== ГЕНЕРАЦИЯ БАГОВ ====================
-        function generateBug() {
-            // Увеличиваем базовую вероятность и делаем зависимость от техдолга более выраженной
-            let chance = 0.10; // 10% каждый кадр - было 0.005
-            
-            // Более агрессивное увеличение шанса с техдолгом
-            if (GameState.techDebt > 10) chance = 0.10;    // 10%
-            if (GameState.techDebt > 20) chance = 0.20;    // 20%
-            if (GameState.techDebt > 30) chance = 0.30;    // 30%
-            if (GameState.techDebt > 40) chance = 0.40;    // 40%
-            if (GameState.techDebt > 50) chance = 0.50;    // 50%
-            if (GameState.techDebt > 60) chance = 0.60;    // 60%
-            if (GameState.techDebt > 70) chance = 0.70;    // 70%
-            if (GameState.techDebt > 80) chance = 0.80;    // 80%
-            if (GameState.techDebt > 90) chance = 0.90;    // 90%
-            
-            // Также увеличиваем частоту вызова этой функции
-            if (Math.random() < chance) {
-                const severity = GameState.techDebt > 70 ? 'critical' : 
-                                GameState.techDebt > 40 ? 'medium' : 'low';
-                
-                const bug = {
-                    id: Date.now(),
-                    x: 1 + Math.random() * (GameState.gridSize - 2),
-                    y: 1 + Math.random() * (GameState.gridSize - 2),
-                    severity,
-                    reward: severity === 'critical' ? 50 : 
-                           severity === 'medium' ? 25 : 10,
-                    fixTime: 30
-                };
-                
-                GameState.bugs.push(bug);
-                createBugEffect(bug.x, bug.y, severity);
-                
-                // УДАЛЕНО: уведомление о новом баге
-                
-                updateTechDebtUI();
-                
-                // Отладочная информация
-                console.log(`Создан баг (техдолг: ${GameState.techDebt}%, шанс: ${chance*100}%)`);
-                
-                setTimeout(() => {
-                    const index = GameState.bugs.findIndex(b => b.id === bug.id);
-                    if (index !== -1) {
-                        GameState.bugs.splice(index, 1);
-                        console.log('Баг исчез (время вышло)');
+        // ==================== ТЕХДОЛГ И БАГИ ====================
+        // Новая модель: техдолг = сумма незакрытых багов (+ немного "накопленного").
+        // Работающие сотрудники копят долг; каждые BUG_VALUE% накопленного долга
+        // превращаются в баг рядом с рабочим местом. Закрыл баг — долг упал.
+        // Шкала больше не может расти, если на карте нет багов.
+        const TECH_DEBT = {
+            growthPerWorker: 0.12,   // %/сек при 1 работающем сотруднике
+            growthExponent: 0.7,     // убывающая отдача: 10 сотрудников ≈ ×5, а не ×10
+            whiteboardReduction: 0.1,// каждая маркерная доска −10% к росту (до −40%)
+            bugValue: 5,             // сколько % долга "несёт" один баг
+            maxBugs: 12,             // больше — баги укрупняются, а не плодятся
+            teamLeadFixTime: 1.2,    // сек на починку бага Team Lead'ом
+            rewardPerValue: 4        // награда TSP за 1% долга в баге
+        };
+
+        let _bugSeq = 0;
+
+        const TechDebtSystem = {
+            pending: 0, // накопленный долг, ещё не ставший багом
+
+            severityFor(value) {
+                return value >= 15 ? 'critical' : value >= 10 ? 'medium' : 'low';
+            },
+
+            recompute() {
+                const sum = GameState.bugs.reduce((s, b) => s + (b.value || 0), 0);
+                GameState.techDebt = Math.min(100, sum + this.pending);
+                // Обновляем DOM только при заметном изменении, а не каждый кадр
+                const shown = Math.floor(GameState.techDebt);
+                if (shown !== this._lastShown) {
+                    this._lastShown = shown;
+                    updateTechDebtUI();
+                }
+            },
+
+            growthPerSec() {
+                const working = GameState.npcs.filter(n => n.state === 'working' && n.id !== 'employee_manager').length;
+                if (working === 0) return 0;
+                const boards = GameState.objects.filter(o => o.id === 'whiteboard').length;
+                const reduction = Math.min(0.4, boards * TECH_DEBT.whiteboardReduction);
+                return TECH_DEBT.growthPerWorker * Math.pow(working, TECH_DEBT.growthExponent) * (1 - reduction);
+            },
+
+            bugPosition() {
+                const workers = GameState.npcs.filter(n => n.state === 'working' && n.id !== 'employee_manager');
+                const anchor = workers.length
+                    ? workers[Math.floor(Math.random() * workers.length)]
+                    : GameState.npcs[0];
+                let x, y;
+                if (anchor) {
+                    x = anchor.x + (Math.random() * 1.6 - 0.8);
+                    y = anchor.y + 0.6 + Math.random() * 0.6;
+                    const room = RoomSystem.getRoomAt(Math.floor(anchor.x), Math.floor(anchor.y));
+                    if (room) {
+                        x = Math.max(room.x + 0.7, Math.min(room.x + room.width - 0.7, x));
+                        y = Math.max(room.y + 0.7, Math.min(room.y + room.height - 0.7, y));
                     }
-                }, bug.fixTime * 1000);
+                } else {
+                    const dev = RoomSystem.rooms.find(r => r.id === 'dev_room');
+                    x = dev.x + 1 + Math.random() * (dev.width - 2);
+                    y = dev.y + 1 + Math.random() * (dev.height - 2);
+                }
+                return { x, y };
+            },
+
+            spawnBug(value) {
+                if (GameState.bugs.length >= TECH_DEBT.maxBugs) {
+                    // Лимит багов на экране — укрупняем самый мелкий, вместо нового
+                    const smallest = GameState.bugs.reduce((a, b) => (a.value <= b.value ? a : b));
+                    smallest.value += value;
+                    smallest.severity = this.severityFor(smallest.value);
+                    smallest.reward = smallest.value * TECH_DEBT.rewardPerValue;
+                    return smallest;
+                }
+                const pos = this.bugPosition();
+                const bug = {
+                    id: `bug_${Date.now()}_${_bugSeq++}`,
+                    x: pos.x, y: pos.y,
+                    value,
+                    severity: this.severityFor(value),
+                    reward: value * TECH_DEBT.rewardPerValue,
+                    claimedBy: null
+                };
+                GameState.bugs.push(bug);
+                createBugEffect(bug.x, bug.y, bug.severity);
+                return bug;
+            },
+
+            // Внешний источник долга (события и т.п.)
+            addDebt(amount) {
+                let left = amount;
+                while (left > 0) {
+                    const v = Math.min(TECH_DEBT.bugValue * 2, left);
+                    this.spawnBug(v);
+                    left -= v;
+                }
+                this.recompute();
+            },
+
+            update(dt) {
+                this.pending += this.growthPerSec() * dt;
+                while (this.pending >= TECH_DEBT.bugValue) {
+                    this.pending -= TECH_DEBT.bugValue;
+                    this.spawnBug(TECH_DEBT.bugValue);
+                }
+                this.recompute();
+            },
+
+            resolveBug(bugId, byTeamLead) {
+                const idx = GameState.bugs.findIndex(b => b.id === bugId);
+                if (idx === -1) return null;
+                const bug = GameState.bugs[idx];
+                GameState.bugs.splice(idx, 1);
+                // Награда идёт через ClickBuffer — так она реально засчитывается сервером
+                GameState.tsp += bug.reward;
+                ClickBuffer.add(bug.reward);
+                if (!byTeamLead) QuestSystem.updateProgress('bug_fix', 1);
+                this.recompute();
+                return bug;
+            },
+
+            reset() {
+                GameState.bugs = [];
+                this.pending = 0;
+                this.recompute();
             }
-        }
+        };
 
         function fixBug(bugId) {
-            const bugIndex = GameState.bugs.findIndex(b => b.id === bugId);
-            if (bugIndex !== -1) {
-                const bug = GameState.bugs[bugIndex];
-                GameState.tsp += bug.reward;
-                GameState.techDebt = Math.max(0, GameState.techDebt - (bug.severity === 'critical' ? 10 : 5));
-                QuestSystem.updateProgress('bug_fix', 1);
-                GameState.bugs.splice(bugIndex, 1);
+            const bug = TechDebtSystem.resolveBug(bugId, false);
+            if (bug) {
                 updateUI();
-                updateTechDebtUI();
-                spawnFloatingText(`+$${bug.reward}`, 
-                    toIso(bug.x, bug.y).x + camera.x, 
-                    toIso(bug.x, bug.y).y + camera.y, 
+                spawnFloatingText(`+$${bug.reward}`,
+                    toIso(bug.x, bug.y).x + camera.x,
+                    toIso(bug.x, bug.y).y + camera.y,
                     '#22c55e');
             }
         }
@@ -3119,11 +3275,12 @@ npc: (npc, type) => {
 
                 if (result.success) {
                     GameState.isServerDown = false;
-                    GameState.techDebt = 0;
+                    TechDebtSystem.reset();
                     // Если менеджер уже шёл чинить сам — снимаем с него это состояние,
                     // чтобы он не застрял на полпути к уже починенному серверу
-                    const fixer = GameState.npcs.find(n => n.state === 'fixing_server');
-                    if (fixer) fixer.state = 'idle';
+                    GameState.npcs.forEach(n => {
+                        if (n.state === 'fixing_server' || n.state === 'repairing_server') n.state = 'idle';
+                    });
 
                     showNotification("✅ Сервер восстановлен вручную!", "success");
                     updateUI();
@@ -3953,82 +4110,8 @@ document.addEventListener('DOMContentLoaded', () => {
             lastTime = timestamp;
             
             // ==== ЛОГИКА ПАДЕНИЯ СЕРВЕРА ====
-        if (!GameState.isServerDown) {
-            // Сервер падает ТОЛЬКО при техдолге 100%
-            if (GameState.techDebt >= 100) {
-                // Шанс падения: 2% каждый кадр при техдолге 100%
-                const crashChance = 0.02;
-                if (Math.random() < crashChance) {
-                    GameState.isServerDown = true;
-                    GameState.serverCrashTime = Date.now();
-                    
-                    // Визуальный эффект падения сервера
-                    const server = GameState.objects.find(o => o.id === 'server_rack');
-                    if (server) {
-                        createBugEffect(server.x, server.y, 'critical');
-                    }
-                    
-                    showNotification("🚨 КРИТИЧЕСКАЯ ОШИБКА: Сервер упал! Доход остановлен!", "error");
-                    
-                    // Ищем Team Lead для починки
-                    const fixer = GameState.npcs.find(n => n.id === 'employee_manager');
-                    if (fixer) {
-                        fixer.state = 'fixing_server';
-                        if (server) {
-                            fixer.targetX = server.x + 0.5;
-                            fixer.targetY = server.y + 0.5;
-                            showNotification(`👨‍💼 ${fixer.name} направляется чинить сервер...`, 'info');
-                        }
-                    } else {
-                        showNotification("Нет Team Lead для починки сервера! Нанять employee_manager", 'warning');
-                    }
-                }
-            }
-        } else {
-            // Логика починки сервера...
-            let fixer = GameState.npcs.find(n => n.state === 'fixing_server');
+            ServerCrashSystem.update(timestamp);
 
-            // Ретроактивное назначение: чинильщика нет (краш случился без Team Lead,
-            // либо менеджер куплен уже ПОСЛЕ краша) — назначаем первого свободного.
-            // Закрывает софтлок "доход встал навечно без единого пути восстановления".
-            if (!fixer) {
-                const availableManager = GameState.npcs.find(
-                    n => n.id === 'employee_manager' && n.state !== 'fixing_server'
-                );
-                if (availableManager) {
-                    const server = GameState.objects.find(o => o.id === 'server_rack');
-                    if (server) {
-                        availableManager.state = 'fixing_server';
-                        availableManager.targetX = server.x + 0.5;
-                        availableManager.targetY = server.y + 0.5;
-                        showNotification(`👨‍💼 ${availableManager.name} направляется чинить сервер...`, 'info');
-                        fixer = availableManager;
-                    }
-                }
-            }
-
-            if (fixer) {
-                const server = GameState.objects.find(o => o.id === 'server_rack');
-                if (server) {
-                    const dist = Math.sqrt(
-                        Math.pow(fixer.x - (server.x + 0.5), 2) + 
-                        Math.pow(fixer.y - (server.y + 0.5), 2)
-                    );
-                    
-                    if (dist < 0.5) {
-                        // Сервер чинится за 10 секунд
-                        const fixTime = 10000;
-                        if (Date.now() - GameState.serverCrashTime > fixTime) {
-                            GameState.isServerDown = false;
-                            GameState.techDebt = 0; // Сброс техдолга после починки
-                            fixer.state = 'idle';
-                            showNotification("✅ Сервер восстановлен! Доход возобновлен.", 'success');
-                        }
-                    }
-                }
-            }
-        }
-            
             // ==== РАСЧЕТ ДОХОДА ====
             // Пассивный доход теперь начисляется в ClickBuffer.tick() (раз в 250мс),
             // а не здесь — см. ClickBuffer.tick(), где GameState.isServerDown
@@ -4037,9 +4120,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateUI();
             
             // ==== ГЕНЕРАЦИЯ БАГОВ ====
-            if (Math.random() < delta * 0.5) {
-                generateBug();
-            }
+            TechDebtSystem.update(delta);
             
             updateNPCs();
             updateParticles();
@@ -4094,63 +4175,174 @@ function checkLevelUp() {
     }
 }
 
-// 3. AI ДЛЯ TEAM LEAD (сбор багов и починка)
+// 3. ПАДЕНИЕ СЕРВЕРА
+// Раньше сервер падал только на 100% техдолга — даже если серверов не было,
+// и тогда доход вставал навсегда. Теперь:
+//  • падать может только купленный server_rack;
+//  • проверка раз в 30 сек: небольшой базовый шанс (периодичность) + рост от техдолга;
+//  • Team Lead идёт к серверу и чинит его SERVER_FIX_TIME сек после прихода;
+//  • без Team Lead — тап по серверу.
+const SERVER_CRASH = {
+    checkIntervalMs: 30000,
+    baseChance: 0.02,        // ~раз в 25 мин даже при нулевом техдолге
+    debtStart: 40,           // с какого техдолга шанс начинает расти
+    maxDebtChance: 0.35,     // добавка при 100% техдолга
+    fixTimeMs: 5000
+};
+
+const ServerCrashSystem = {
+    lastCheck: 0,
+    warned: false,
+
+    servers() {
+        return GameState.objects.filter(o => o.id === 'server_rack');
+    },
+
+    crashChance() {
+        const debt = GameState.techDebt || 0;
+        const extra = debt > SERVER_CRASH.debtStart
+            ? (debt - SERVER_CRASH.debtStart) / (100 - SERVER_CRASH.debtStart) * SERVER_CRASH.maxDebtChance
+            : 0;
+        return SERVER_CRASH.baseChance + extra;
+    },
+
+    crash() {
+        const servers = this.servers();
+        if (servers.length === 0) return;
+        const server = servers[Math.floor(Math.random() * servers.length)];
+        GameState.isServerDown = true;
+        GameState.serverCrashTime = Date.now();
+        GameState.crashedServer = { x: server.x, y: server.y };
+        createBugEffect(server.x, server.y, 'critical');
+
+        const fixer = GameState.npcs.find(n => n.id === 'employee_manager');
+        if (fixer) {
+            showNotification("🚨 Сервер упал! Доход остановлен. Team Lead уже бежит чинить.", "error");
+        } else {
+            showNotification("🚨 Сервер упал! Доход остановлен. Нажмите на сервер, чтобы починить.", "error");
+        }
+    },
+
+    update(timestamp) {
+        const servers = this.servers();
+
+        // Сервер "упал", а серверов нет (старое сохранение/старый баг) — снимаем блокировку
+        if (GameState.isServerDown && servers.length === 0) {
+            GameState.isServerDown = false;
+            GameState.crashedServer = null;
+            return;
+        }
+
+        if (!GameState.isServerDown) {
+            if (servers.length === 0) return;
+            if (!this.lastCheck) this.lastCheck = timestamp;
+
+            if ((GameState.techDebt || 0) >= 70 && !this.warned) {
+                this.warned = true;
+                showNotification("🔥 Техдолг высокий — сервера перегреваются. Чините баги!", "warning");
+            } else if ((GameState.techDebt || 0) < 50) {
+                this.warned = false;
+            }
+
+            if (timestamp - this.lastCheck >= SERVER_CRASH.checkIntervalMs) {
+                this.lastCheck = timestamp;
+                if (Math.random() < this.crashChance()) this.crash();
+            }
+            return;
+        }
+
+        // Сервер лежит — назначаем Team Lead
+        const crashed = GameState.crashedServer || servers[0];
+        let fixer = GameState.npcs.find(n => n.state === 'fixing_server' || n.state === 'repairing_server');
+        if (!fixer) {
+            fixer = GameState.npcs.find(n => n.id === 'employee_manager');
+            if (fixer) {
+                if (fixer.huntingBugId) {
+                    const bug = GameState.bugs.find(b => b.id === fixer.huntingBugId);
+                    if (bug) bug.claimedBy = null;
+                    fixer.huntingBugId = null;
+                }
+                fixer.state = 'fixing_server';
+                fixer.targetX = crashed.x + 0.5;
+                fixer.targetY = crashed.y + 1.3;
+                showNotification(`👨‍💼 ${fixer.name} направляется чинить сервер...`, 'info');
+            }
+        }
+        if (!fixer) return;
+
+        if (fixer.state === 'fixing_server') {
+            const dist = Math.hypot(fixer.x - fixer.targetX, fixer.y - fixer.targetY);
+            if (dist < 0.15) {
+                fixer.state = 'repairing_server';
+                fixer.repairStart = Date.now();
+            }
+        } else if (fixer.state === 'repairing_server') {
+            if (Date.now() - fixer.repairStart >= SERVER_CRASH.fixTimeMs) {
+                GameState.isServerDown = false;
+                GameState.crashedServer = null;
+                TechDebtSystem.reset();
+                fixer.state = 'idle';
+                fixer.idleUntil = 0;
+                this.lastCheck = timestamp;
+                showNotification("✅ Сервер восстановлен! Доход возобновлен.", 'success');
+            }
+        }
+    }
+};
+
+// 3.1 AI ДЛЯ TEAM LEAD: идёт к багу с нормальной скоростью, чинит его на месте
 function updateTeamLeads() {
     const managers = GameState.npcs.filter(npc => npc.id === 'employee_manager');
     managers.forEach(manager => {
-        // Менеджер уже назначен чинить упавший сервер — не переключаем его
-        // на баг-хантинг/блуждание, иначе он никогда не доходит до сервера
-        if (manager.state === 'fixing_server') return;
+        // Сервер — в приоритете, им управляет ServerCrashSystem
+        if (manager.state === 'fixing_server' || manager.state === 'repairing_server') return;
 
-        const speed = 2 * (manager.speed || 1);
-
-        // Ищем ближайший баг
-        if (GameState.bugs.length > 0) {
-            let nearestBug = null;
-            let minDist = Infinity;
-            GameState.bugs.forEach(bug => {
-                const d = Math.hypot(bug.x - manager.x, bug.y - manager.y);
-                if (d < minDist) { minDist = d; nearestBug = bug; }
-            });
-
-            if (nearestBug) {
-                const dx = nearestBug.x - manager.x;
-                const dy = nearestBug.y - manager.y;
-                const dist = Math.hypot(dx, dy);
-                if (dist > 5) {
-                    manager.x += (dx / dist) * speed;
-                    manager.y += (dy / dist) * speed;
-                    manager.state = 'moving';
-                } else {
-                    const bugIndex = GameState.bugs.indexOf(nearestBug);
-                    if (bugIndex > -1) {
-                        GameState.bugs.splice(bugIndex, 1);
-                        GameState.tsp += 50;
-                        FloatingTextSystem.add(manager.x, manager.y - 40, `FIXED! +$50`, '#10b981');
-                        // showNotification("Team Lead исправил баг!", "success");
-                    }
-                }
-                return;
-            }
-        }
-        
-        // Если багов нет — проверяем серверы
-        if (!manager.targetServer) {
-            const servers = GameState.objects.filter(o => o.id === 'server_rack');
-            if (servers.length > 0) manager.targetServer = servers[Math.floor(Math.random() * servers.length)];
-        }
-        if (manager.targetServer) {
-            const tx = manager.targetServer.x, ty = manager.targetServer.y;
-            const dist = Math.hypot(tx - manager.x, ty - manager.y);
-            if (dist > 40) {
-                manager.x += ((tx - manager.x) / dist) * speed * 0.5;
-                manager.y += ((ty - manager.y) / dist) * speed * 0.5;
-                manager.state = 'moving';
-            } else {
+        // Чиним баг на месте
+        if (manager.state === 'fixing_bug') {
+            const bug = GameState.bugs.find(b => b.id === manager.huntingBugId);
+            if (!bug) { manager.state = 'idle'; manager.huntingBugId = null; return; }
+            if (Date.now() - manager.fixStart >= TECH_DEBT.teamLeadFixTime * 1000) {
+                const fixed = TechDebtSystem.resolveBug(bug.id, true);
                 manager.state = 'idle';
-                if (Math.random() < 0.01) manager.targetServer = null;
+                manager.huntingBugId = null;
+                manager.idleUntil = 0;
+                if (fixed) FloatingTextSystem.add(manager.x, manager.y, `FIXED! +$${fixed.reward}`, '#10b981');
             }
+            return;
         }
+
+        // Идём к багу
+        if (manager.state === 'hunting_bug') {
+            const bug = GameState.bugs.find(b => b.id === manager.huntingBugId);
+            if (!bug) { manager.state = 'idle'; manager.huntingBugId = null; return; }
+            manager.targetX = bug.x;
+            manager.targetY = bug.y;
+            if (Math.hypot(bug.x - manager.x, bug.y - manager.y) < 0.35) {
+                manager.state = 'fixing_bug';
+                manager.fixStart = Date.now();
+            }
+            return;
+        }
+
+        // Свободен — берём ближайший незанятый баг
+        const freeBugs = GameState.bugs.filter(b => !b.claimedBy);
+        if (freeBugs.length > 0) {
+            let nearest = null, minDist = Infinity;
+            freeBugs.forEach(bug => {
+                const d = Math.hypot(bug.x - manager.x, bug.y - manager.y);
+                if (d < minDist) { minDist = d; nearest = bug; }
+            });
+            nearest.claimedBy = manager;
+            manager.huntingBugId = nearest.id;
+            manager.state = 'hunting_bug';
+            manager.idleUntil = 0;
+            manager.targetX = nearest.x;
+            manager.targetY = nearest.y;
+            return;
+        }
+
+        // Багов нет — обычное блуждание (updateNPCs, с паузами)
+        if (manager.state !== 'idle') manager.state = 'idle';
     });
 }
 
@@ -4231,8 +4423,7 @@ const FloatingTextSystem = {
                             text: 'Обойдутся (Техдолг +15%)',
                             color: 'bg-red-600 hover:bg-red-500',
                             action: () => {
-                                GameState.techDebt = Math.min(100, GameState.techDebt + 15);
-                                updateTechDebtUI();
+                                TechDebtSystem.addDebt(15);
                                 showNotification('Команда недовольна. Код пишется с багами.', 'warning');
                             }
                         }
@@ -5263,8 +5454,8 @@ window.buyOfflineUpgrade = async function(cost, newLimit, newTier) {
         if (result.success) {
             // Если сервер одобрил покупку, обновляем состояние клиента из его ответа
             GameState.tsp = result.newBalance;
-            GameState.objects = result.newObjects;
-            GameState.npcs = result.newNpcs;
+            GameState.objects = mergeServerList(GameState.objects, result.newObjects, null);
+            GameState.npcs = mergeServerList(GameState.npcs, result.newNpcs, hydrateNpc);
             GameState.autoClicker = result.newAutoClicker;
             
             showNotification(`✅ Покупка "${item.name}" совершена!`, 'success');
