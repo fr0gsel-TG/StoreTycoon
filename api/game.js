@@ -5,7 +5,7 @@ const cors = require('cors');
 const axios = require('axios');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '4mb' })); // 4mb — для картинки карточки (/api/share/prepare)
 app.use(cors()); // Разрешаем запросы от игры
 
 // ==========================================
@@ -1558,6 +1558,136 @@ app.post('/api/league/claim', async (req, res) => {
         if (error.message === 'PLAYER_NOT_FOUND') return res.status(404).json({ success: false, error: 'Игрок не найден.' });
         console.error('Ошибка выдачи награды лиги:', error);
         res.status(500).json({ success: false, error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// ==========================================
+// КАРТОЧКА ДЛЯ ШАРИНГА
+// ==========================================
+// Клиент рисует карточку (офис из спрайтов + статистика) в JPEG и присылает сюда.
+// Сервер загружает фото в Telegram (получает file_id), готовит inline-сообщение
+// через savePreparedInlineMessage — клиент открывает нативное окно "Поделиться" (tg.shareMessage).
+// Фото кладётся в SHARE_STORAGE_CHAT_ID (приватный канал, где бот — админ), а если он не задан —
+// в личный чат игрока с ботом (заодно карточку можно переслать оттуда вручную).
+const SHARE_MAX_BYTES = 2.5 * 1024 * 1024;
+const SHARE_COOLDOWN_MS = 20 * 1000;
+const BOT_USERNAME = process.env.BOT_USERNAME || 'DigitalCryptoStore_bot';
+const BOT_APP_NAME = process.env.BOT_APP_NAME || 'game';
+
+async function tgApi(method, body) {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
+    const resp = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: 'POST',
+        headers: isForm ? undefined : { 'Content-Type': 'application/json' },
+        body: isForm ? body : JSON.stringify(body)
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!json.ok) {
+        const err = new Error(`TG_${method}_FAILED: ${json.description || resp.status}`);
+        err.tg = json;
+        throw err;
+    }
+    return json.result;
+}
+
+app.post('/api/share/prepare', async (req, res) => {
+    try {
+        const { initData, image } = req.body;
+        if (!verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN)) {
+            return res.status(403).json({ success: false, error: 'Неверная подпись.' });
+        }
+        const playerId = getPlayerIdFromInitData(initData);
+        if (!playerId) return res.status(400).json({ success: false, error: 'Не удалось получить ID.' });
+
+        const m = typeof image === 'string' && image.match(/^data:image\/(jpeg|png);base64,(.+)$/);
+        if (!m) return res.status(400).json({ success: false, error: 'Нет изображения.' });
+        const buf = Buffer.from(m[2], 'base64');
+        if (buf.length > SHARE_MAX_BYTES) return res.status(413).json({ success: false, error: 'Слишком большая картинка.' });
+
+        // Антиспам: не чаще раза в SHARE_COOLDOWN_MS
+        const playerRef = db.collection('players').doc(playerId);
+        const doc = await playerRef.get();
+        if (!doc.exists) return res.status(404).json({ success: false, error: 'Игрок не найден.' });
+        const lastShareAt = doc.data().lastShareAt || 0;
+        if (Date.now() - lastShareAt < SHARE_COOLDOWN_MS) {
+            return res.status(429).json({ success: false, error: 'Подождите немного перед следующей карточкой.' });
+        }
+        await playerRef.set({ lastShareAt: Date.now() }, { merge: true });
+
+        const referralLink = `https://t.me/${BOT_USERNAME}/${BOT_APP_NAME}?startapp=ref_${playerId}`;
+        const caption = '🏢 Мой IT-офис в StoreTycoon! Построй свой и обгони меня в лиге 🏆';
+
+        // 1) Загрузка фото в Telegram → file_id
+        const storageChat = process.env.SHARE_STORAGE_CHAT_ID || playerId;
+        const form = new FormData();
+        form.append('chat_id', String(storageChat));
+        form.append('caption', storageChat === playerId
+            ? '📸 Ваша карточка готова! Её можно переслать друзьям.'
+            : `share card ${playerId}`);
+        if (storageChat === playerId) form.append('disable_notification', 'true');
+        form.append('photo', new Blob([buf], { type: `image/${m[1]}` }), `card.${m[1] === 'png' ? 'png' : 'jpg'}`);
+        let sent;
+        try {
+            sent = await tgApi('sendPhoto', form);
+        } catch (e) {
+            console.error('share sendPhoto error:', e.message);
+            return res.status(502).json({ success: false, error: 'Не удалось загрузить карточку. Нажмите /start в чате с ботом и попробуйте снова.' });
+        }
+        const photos = sent.photo || [];
+        const fileId = photos.length ? photos[photos.length - 1].file_id : null;
+        if (!fileId) return res.status(502).json({ success: false, error: 'Telegram не вернул фото.' });
+
+        // 2) Подготовленное сообщение для tg.shareMessage (Bot API 8.0+)
+        let preparedId = null;
+        try {
+            const prepared = await tgApi('savePreparedInlineMessage', {
+                user_id: Number(playerId),
+                result: {
+                    type: 'photo',
+                    id: crypto.randomBytes(8).toString('hex'),
+                    photo_file_id: fileId,
+                    caption,
+                    reply_markup: { inline_keyboard: [[{ text: '🎮 Играть в StoreTycoon', url: referralLink }]] }
+                },
+                allow_user_chats: true,
+                allow_bot_chats: false,
+                allow_group_chats: true,
+                allow_channel_chats: true
+            });
+            preparedId = prepared.id;
+        } catch (e) {
+            console.warn('savePreparedInlineMessage failed:', e.message);
+        }
+
+        res.json({
+            success: true,
+            preparedId,
+            referralLink,
+            caption,
+            // Публичная ссылка на картинку для tg.shareToStory
+            imageUrl: `/api/share/img?f=${encodeURIComponent(fileId)}`
+        });
+    } catch (error) {
+        console.error('Ошибка подготовки карточки:', error);
+        res.status(500).json({ success: false, error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Отдаёт картинку карточки по file_id (нужен публичный URL для историй Telegram)
+app.get('/api/share/img', async (req, res) => {
+    try {
+        const fileId = String(req.query.f || '');
+        if (!/^[A-Za-z0-9_-]{20,200}$/.test(fileId)) return res.status(400).end();
+        const file = await tgApi('getFile', { file_id: fileId });
+        const resp = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
+        if (!resp.ok) return res.status(404).end();
+        const buf = Buffer.from(await resp.arrayBuffer());
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+        res.end(buf);
+    } catch (e) {
+        res.status(404).end();
     }
 });
 
