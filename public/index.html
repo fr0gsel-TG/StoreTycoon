@@ -365,6 +365,9 @@
 </button>
 
 <div class="fixed bottom-6 left-4 z-40 flex flex-col gap-3">
+    <button onclick="LeagueUI.open()" title="Лига" class="w-12 h-12 bg-amber-500/90 backdrop-blur rounded-full text-2xl shadow-lg border border-amber-300 flex items-center justify-center transition-transform active:scale-90">
+    🏆
+</button>
     <button onclick="returnToStore()" class="w-12 h-12 bg-slate-800/80 backdrop-blur rounded-full text-2xl shadow-lg border border-slate-600 flex items-center justify-center transition-transform active:scale-90">
     🚪
 </button>
@@ -545,6 +548,30 @@
         <div class="p-3 bg-slate-950 text-center text-slate-500 text-xs border-t border-slate-800">
             Транзакции защищены сетью TON Blockchain
         </div>
+    </div>
+</div>
+
+<!-- =========== ЛИГА =========== -->
+<div id="leagueModal" class="hidden fixed inset-0 z-[210] bg-slate-950/95 backdrop-blur-xl flex flex-col pt-[calc(var(--tg-header-height,60px)+0.5rem)] pb-[env(safe-area-inset-bottom)]">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+        <div>
+            <div id="league-title" class="text-xl font-black text-white">🏆 Лига</div>
+            <div id="league-timer" class="text-xs text-slate-400">—</div>
+        </div>
+        <button onclick="LeagueUI.close()" class="w-10 h-10 rounded-full bg-slate-800 text-white text-xl">✕</button>
+    </div>
+    <div id="league-tiers" class="flex justify-between px-4 py-3 gap-1"></div>
+    <div id="league-me" class="mx-4 mb-2 p-3 rounded-xl bg-indigo-600/20 border border-indigo-500/50 text-sm text-white">Загрузка…</div>
+    <div class="px-4 pb-1 text-[11px] text-slate-500">Очки IPO = доход за неделю. Топ поднимается в лигу выше, низ таблицы опускается. Итоги — в воскресенье в 23:59 (МСК).</div>
+    <div id="league-list" class="flex-1 overflow-y-auto px-4 pb-6 space-y-1 no-scrollbar"></div>
+</div>
+
+<div id="leagueResultModal" class="hidden fixed inset-0 z-[220] bg-black/80 flex items-center justify-center backdrop-blur-md">
+    <div class="bg-slate-900 border-2 border-amber-500 rounded-2xl p-6 w-[85%] max-w-sm text-center">
+        <div id="league-result-icon" class="text-5xl mb-3">🏆</div>
+        <h2 id="league-result-title" class="text-2xl font-bold text-white mb-2">Итоги недели</h2>
+        <p id="league-result-text" class="text-slate-300 mb-6"></p>
+        <button onclick="LeagueUI.closeResult()" class="w-full bg-amber-500 text-slate-900 font-bold py-3 rounded-xl">Отлично!</button>
     </div>
 </div>
 
@@ -2283,6 +2310,96 @@ const ClickBuffer = {
 
 // Запускаем тикер буфера. Он будет работать параллельно с gameLoop
 setInterval(() => ClickBuffer.tick(), 250); // Проверяем 4 раза в секунду
+
+// ==========================================
+// ЛИГИ (клиент): данные полностью с сервера /api/league/me
+// ==========================================
+const LeagueUI = {
+    data: null,
+    timerId: null,
+    fmt(n) {
+        n = Math.floor(n || 0);
+        if (n >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return String(n);
+    },
+    esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); },
+    async fetch() {
+        const initData = SaveSystem._getInitData();
+        if (!initData) return null;
+        try {
+            const r = await fetch('/api/league/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ initData }) });
+            const j = await r.json();
+            if (j.success) { this.data = j; return j; }
+        } catch (e) { console.warn('League fetch error', e); }
+        return null;
+    },
+    async open() {
+        document.getElementById('leagueModal').classList.remove('hidden');
+        document.getElementById('league-me').textContent = 'Загрузка…';
+        // Сначала отправим накопленный доход, чтобы очки были актуальными
+        try { await ClickBuffer.forceSend(); } catch (e) {}
+        const d = await this.fetch();
+        if (!d) { document.getElementById('league-me').textContent = 'Не удалось загрузить лигу. Попробуйте позже.'; return; }
+        this.render(d);
+        this.maybeShowResult(d);
+        clearInterval(this.timerId);
+        this.timerId = setInterval(() => this.renderTimer(), 1000);
+    },
+    close() {
+        document.getElementById('leagueModal').classList.add('hidden');
+        clearInterval(this.timerId);
+    },
+    renderTimer() {
+        if (!this.data) return;
+        const ms = Math.max(0, this.data.weekEndsAt - Date.now());
+        const d = Math.floor(ms / 86400000), h = Math.floor(ms / 3600000) % 24, m = Math.floor(ms / 60000) % 60;
+        document.getElementById('league-timer').textContent = ms > 0 ? `До конца недели: ${d}д ${h}ч ${m}м` : 'Неделя завершена — откройте лигу заново';
+    },
+    render(d) {
+        const tier = d.tiers[d.tier];
+        document.getElementById('league-title').textContent = `${tier.icon} ${tier.name}`;
+        this.renderTimer();
+        document.getElementById('league-tiers').innerHTML = d.tiers.map(t =>
+            `<div class="flex-1 text-center rounded-lg py-1 ${t.id === d.tier ? 'bg-amber-500 text-slate-900 font-bold' : t.id < d.tier ? 'bg-slate-700 text-slate-300' : 'bg-slate-800/60 text-slate-500'}">
+                <div class="text-lg">${t.icon}</div><div class="text-[9px] leading-tight">${this.esc(t.name)}</div></div>`).join('');
+        const place = d.myPlace;
+        let zone = 'Держитесь в середине таблицы, чтобы остаться в лиге.';
+        if (place && place <= d.promote) zone = '⬆️ Вы в зоне повышения!';
+        else if (place && d.demote && place > d.size - d.demote) zone = '⬇️ Зона понижения — поднажмите!';
+        document.getElementById('league-me').innerHTML =
+            `<div class="flex justify-between font-bold"><span>Ваше место: ${place || '—'} / ${d.size}</span><span class="text-amber-400">${this.fmt(d.myPoints)} IPO</span></div>
+             <div class="text-xs text-slate-300 mt-1">${zone}</div>`;
+        document.getElementById('league-list').innerHTML = d.standings.map(s => {
+            const up = s.place <= d.promote, down = d.demote && s.place > d.size - d.demote;
+            const cls = s.isMe ? 'bg-indigo-600/40 border-indigo-400' : up ? 'bg-emerald-900/30 border-emerald-700/50' : down ? 'bg-red-900/30 border-red-800/50' : 'bg-slate-800/60 border-slate-700/50';
+            const medal = s.place === 1 ? '🥇' : s.place === 2 ? '🥈' : s.place === 3 ? '🥉' : s.place;
+            return `<div class="flex items-center gap-3 px-3 py-2 rounded-lg border ${cls}">
+                <span class="w-7 text-center font-bold text-white">${medal}</span>
+                <span class="flex-1 truncate text-white">${this.esc(s.name)}${s.isMe ? ' (вы)' : ''}</span>
+                <span class="text-amber-400 font-bold text-sm">${this.fmt(s.points)}</span>
+                <span class="w-4 text-xs">${up ? '⬆️' : down ? '⬇️' : ''}</span></div>`;
+        }).join('');
+    },
+    maybeShowResult(d) {
+        const r = d && d.lastResult;
+        if (!r || localStorage.getItem('leagueResultSeen') === r.week) return;
+        localStorage.setItem('leagueResultSeen', r.week);
+        const to = d.tiers[r.toTier] || d.tiers[0];
+        const icon = r.change === 'up' ? '🚀' : r.change === 'down' ? '📉' : '🏆';
+        const head = r.change === 'up' ? 'Повышение!' : r.change === 'down' ? 'Понижение' : 'Вы удержались в лиге';
+        document.getElementById('league-result-icon').textContent = icon;
+        document.getElementById('league-result-title').textContent = head;
+        document.getElementById('league-result-text').innerHTML =
+            `Место на прошлой неделе: <b>${r.place} из ${r.size}</b> (${this.fmt(r.points)} IPO).<br>Ваша лига теперь: <b>${to.icon} ${this.esc(to.name)}</b>`;
+        document.getElementById('leagueResultModal').classList.remove('hidden');
+    },
+    closeResult() { document.getElementById('leagueResultModal').classList.add('hidden'); }
+};
+// Через несколько секунд после старта проверяем итоги прошлой недели
+setTimeout(async () => { const d = await LeagueUI.fetch(); if (d) LeagueUI.maybeShowResult(d); }, 8000);
 
 
 
