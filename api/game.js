@@ -31,6 +31,9 @@ const db = admin.firestore();
 // ==========================================
 // 2. ФУНКЦИИ ВЕРИФИКАЦИИ TELEGRAM (без изменений)
 // ==========================================
+// Максимальный возраст подписи Telegram initData (по умолчанию 24 часа).
+const INIT_DATA_MAX_AGE_SEC = parseInt(process.env.INIT_DATA_MAX_AGE_SEC, 10) || 86400;
+
 function verifyTelegramAuth(initData, botToken) {
     if (!initData || !botToken) return false;
     try {
@@ -40,7 +43,16 @@ function verifyTelegramAuth(initData, botToken) {
         const dataCheckString = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}=${value}`).join('\n');
         const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
         const computedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-        return computedHash === hash;
+        if (!hash || hash.length !== computedHash.length) return false;
+        if (!crypto.timingSafeEqual(Buffer.from(computedHash, 'hex'), Buffer.from(hash, 'hex'))) return false;
+
+        // initData без срока годности можно переиспользовать бесконечно —
+        // отклоняем слишком старые подписи.
+        const authDate = parseInt(params.get('auth_date'), 10);
+        if (!authDate) return false;
+        const ageSec = Math.floor(Date.now() / 1000) - authDate;
+        if (ageSec > INIT_DATA_MAX_AGE_SEC) return false;
+        return true;
     } catch (e) {
         console.error("Ошибка проверки подписи Telegram:", e);
         return false;
@@ -56,6 +68,22 @@ function getPlayerIdFromInitData(initData) {
         return null;
     }
 }
+
+// lastSaved исторически писался то числом (Date.now()), то Firestore Timestamp.
+// Приводим к миллисекундам, чтобы расчёты времени не превращались в NaN.
+function toMillis(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (value && typeof value.toMillis === 'function') return value.toMillis();
+    return null;
+}
+
+// Базовый лимит оффлайн-дохода (3 часа) — совпадает с клиентом и тирами upgrade-offline.
+const DEFAULT_OFFLINE_LIMIT_SEC = 10800;
+
+// Ограничения для /api/action/sync-income
+const MAX_SYNC_WINDOW_SEC = 300;     // максимум 5 минут дохода за один запрос
+const MAX_CLICKS_PER_SEC = 15;       // потолок ручных кликов в секунду
+const MAX_INCOME_MULTIPLIER = 2;     // максимальный множитель дохода от игровых событий
 
 // ==========================================
 // 3. СЕРВЕРНАЯ ЛОГИКА ИГРЫ (МОЗГ ИГРЫ)
@@ -171,7 +199,7 @@ app.post('/api/action/sync-income', async (req, res) => {
         const { initData, amount } = req.body;
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
-        if (!verifyTelegramAuth(initData, botToken) || !amount || amount < 0) {
+        if (!verifyTelegramAuth(initData, botToken) || typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
             return res.status(403).json({ success: false, error: 'Неверные данные.' });
         }
         const playerId = getPlayerIdFromInitData(initData);
@@ -182,33 +210,42 @@ app.post('/api/action/sync-income', async (req, res) => {
         const playerRef = db.collection('players').doc(playerId);
         let newBalance = 0;
         let newAutoClicker = 0;
+        let credited = 0;
 
         await db.runTransaction(async (transaction) => {
             const playerDoc = await transaction.get(playerRef);
-            if (!playerDoc.exists) {
-                // Если игрока нет, создаем его с начальным балансом
-                newBalance = 100 + amount;
-                newAutoClicker = 0;
-                transaction.set(playerRef, { progress: { tsp: newBalance, autoClicker: newAutoClicker, objects: [], npcs: [] } });
-            } else {
-                const progress = playerDoc.data().progress || {};
-                const currentBalance = progress.tsp || 0;
-                newBalance = currentBalance + amount;
+            // Игрок создаётся только через /api/load — здесь не создаём.
+            if (!playerDoc.exists) throw new Error('PLAYER_NOT_FOUND');
 
-                // Пересчитываем доход на основе текущего состояния
-                newAutoClicker = GameFormulas.recalculateGlobalIncome(progress);
+            const progress = playerDoc.data().progress || {};
+            const now = Date.now();
 
-                transaction.update(playerRef, {
-                    'progress.tsp': newBalance,
-                    'progress.autoClicker': newAutoClicker,
-                    'progress.lastSaved': Date.now()
-                });
-            }
+            // Сервер сам считает, сколько игрок мог заработать с прошлой синхронизации.
+            // Сумма от клиента — только заявка, начисляется не больше потолка.
+            const lastSync = toMillis(progress.lastIncomeSync) || toMillis(progress.lastSaved) || now;
+            const elapsedSec = Math.min(Math.max((now - lastSync) / 1000, 0), MAX_SYNC_WINDOW_SEC);
+
+            newAutoClicker = GameFormulas.recalculateGlobalIncome(progress);
+            const clickPower = progress.clickPower || 1;
+            const maxAllowed = elapsedSec * (newAutoClicker * MAX_INCOME_MULTIPLIER + clickPower * MAX_CLICKS_PER_SEC);
+
+            credited = Math.min(amount, maxAllowed);
+            newBalance = (progress.tsp || 0) + credited;
+
+            transaction.update(playerRef, {
+                'progress.tsp': newBalance,
+                'progress.autoClicker': newAutoClicker,
+                'progress.lastSaved': now,
+                'progress.lastIncomeSync': now
+            });
         });
 
-        res.json({ success: true, newBalance: newBalance, newAutoClicker: newAutoClicker });
+        res.json({ success: true, newBalance, newAutoClicker, credited });
 
     } catch (error) {
+        if (error.message === 'PLAYER_NOT_FOUND') {
+            return res.status(404).json({ success: false, error: 'Игрок не найден.' });
+        }
         console.error("Ошибка при синхронизации дохода:", error);
         res.status(500).json({ success: false, error: 'Внутренняя ошибка сервера' });
     }
@@ -500,12 +537,37 @@ app.post('/api/action/check-subscription', async (req, res) => {
 
 app.post('/api/handle-start', async (req, res) => {
     try {
-        const { userId, referrerId } = req.body;
-        
-        if (!userId || !referrerId) return res.sendStatus(400);
-        if (userId.toString() === referrerId.toString()) return res.status(200).json({ ok: false, error: "Self-ref" });
+        let userId, referrerId;
 
-        const refDoc = db.collection('referrals').doc(userId.toString());
+        const internalSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+        const isInternal = !!internalSecret && req.headers['x-internal-secret'] === internalSecret;
+
+        if (isInternal) {
+            // Вызов от нашего бота (api/bot.js) — доверяем телу запроса.
+            userId = req.body.userId;
+            referrerId = req.body.referrerId;
+        } else {
+            // Вызов из Mini App — всё берём из подписанного initData.
+            const { initData } = req.body;
+            if (!verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN)) {
+                return res.status(403).json({ ok: false, error: 'Неверная подпись.' });
+            }
+            userId = getPlayerIdFromInitData(initData);
+            const startParam = new URLSearchParams(initData).get('start_param') || '';
+            referrerId = startParam.startsWith('ref_') ? startParam.slice(4) : null;
+        }
+
+        if (!userId || !referrerId) return res.status(400).json({ ok: false, error: 'Нет данных.' });
+        userId = userId.toString();
+        referrerId = referrerId.toString();
+        if (!/^\d+$/.test(userId) || !/^\d+$/.test(referrerId)) return res.status(400).json({ ok: false, error: 'Неверный ID.' });
+        if (userId === referrerId) return res.status(200).json({ ok: false, error: "Self-ref" });
+
+        // Реферальная ссылка работает только для новых игроков.
+        const playerDoc = await db.collection('players').doc(userId).get();
+        if (playerDoc.exists) return res.json({ ok: false, error: 'Игрок уже зарегистрирован.' });
+
+        const refDoc = db.collection('referrals').doc(userId);
         const doc = await refDoc.get();
 
         // Записываем реферала только если его еще нет в системе (чтобы нельзя было сменить реферера)
@@ -521,7 +583,7 @@ app.post('/api/handle-start', async (req, res) => {
         res.json({ ok: true });
     } catch (e) {
         console.error("Handle Start Error:", e);
-        res.status(500).json({ error: e.message });
+        res.status(500).json({ ok: false, error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -969,56 +1031,6 @@ app.post('/api/action/save-meta', async (req, res) => {
     }
 });
 
-// ==========================================
-// 2. ЭНДПОИНТ СИНХРОНИЗАЦИИ (ВМЕСТО /save) — DEPRECATED, клиент больше не вызывает
-// ==========================================
-app.post('/api/game/sync', async (req, res) => {
-    try {
-        const { initData, addedClicks, metadata } = req.body;
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
-
-        if (!verifyTelegramAuth(initData, botToken)) {
-            return res.status(403).json({ success: false, error: 'Ошибка доступа' });
-        }
-
-        const playerId = getPlayerIdFromInitData(initData);
-        const playerRef = db.collection('players').doc(playerId);
-
-        // Используем транзакцию, чтобы избежать гонки данных
-        await db.runTransaction(async (transaction) => {
-            const doc = await transaction.get(playerRef);
-            if (!doc.exists) throw new Error("Player not found");
-
-            const progress = doc.data().progress || {};
-            
-            // 1. Считаем только новые токены от кликов
-            const clickPower = progress.clickPower || 1;
-            const earned = (addedClicks || 0) * clickPower;
-            const currentBalance = progress.tsp || 0;
-
-            // 2. Формируем обновление (только конкретные поля!)
-            const updates = {
-                'progress.tsp': currentBalance + earned,
-                'progress.lastSaved': admin.firestore.FieldValue.serverTimestamp()
-            };
-
-            // 3. Если клиент прислал "мягкие" данные (диалоги, открытые комнаты)
-            if (metadata) {
-                if (metadata.shownDialogues) updates['progress.shownDialogues'] = metadata.shownDialogues;
-                if (metadata.unlockedRooms) updates['progress.unlockedRooms'] = metadata.unlockedRooms;
-            }
-
-            transaction.update(playerRef, updates);
-        });
-
-        res.json({ success: true, message: 'Синхронизация успешна' });
-    } catch (error) {
-        console.error("Sync error:", error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Эндпоинт для полного сброса (если нужен)
 app.post('/api/game/reset', async (req, res) => {
     try {
         const { initData } = req.body;
@@ -1094,17 +1106,18 @@ app.post('/api/load', async (req, res) => {
             if (progress.instagramRewardClaimed === undefined) progress.instagramRewardClaimed = false;
             if (progress.telegramRewardClaimed === undefined) progress.telegramRewardClaimed = false;
 
-            const lastSavedTime = progress.lastSaved || null;
+            const lastSavedTime = toMillis(progress.lastSaved);
             let offlineIncome = 0;
 
             // Расчёт оффлайн дохода
             if (lastSavedTime && (progress.autoClicker || 0) > 0) {
                 const diffInSeconds = Math.floor((now - lastSavedTime) / 1000);
                 const ONE_HOUR = 3600;
-                const FOUR_HOURS = 14400;
+                // Учитываем купленное улучшение оффлайн-лимита (upgrade-offline)
+                const offlineLimit = progress.offlineLimit || DEFAULT_OFFLINE_LIMIT_SEC;
 
                 if (diffInSeconds > ONE_HOUR) {
-                    const secondsToCalculate = Math.min(diffInSeconds, FOUR_HOURS);
+                    const secondsToCalculate = Math.min(diffInSeconds, offlineLimit);
                     offlineIncome = Math.floor(secondsToCalculate * progress.autoClicker);
                     
                     if (offlineIncome > 0) {
@@ -1114,6 +1127,8 @@ app.post('/api/load', async (req, res) => {
             }
             
             progress.lastSaved = now;
+            // Оффлайн-доход начислен по текущий момент — окно sync-income начинается заново.
+            progress.lastIncomeSync = now;
 
             // Сохраняем прогресс с обновленными флагами и временем
             await playerRef.update({ 
@@ -1140,6 +1155,9 @@ app.post('/api/load', async (req, res) => {
                 xp: 0,
                 companyLevel: 1,
                 lastSaved: now,
+                lastIncomeSync: now,
+                offlineLimit: DEFAULT_OFFLINE_LIMIT_SEC,
+                offlineTier: 1,
                 unlockedRooms: ['dev_room'],
                 itemLevels: {}, 
                 questsData: { activeQuests: [], completedQuests: [], failedQuests: [] },

@@ -55,7 +55,8 @@ Telegram Mini App в жанре Tycoon/Idle. Игрок управляет IT-к
 запросом на конкретный `/api/action/*`-эндпоинт; сервер сам:
 
 1. проверяет подпись `initData` (`verifyTelegramAuth`, HMAC-SHA256 от
-   `TELEGRAM_BOT_TOKEN`);
+   `TELEGRAM_BOT_TOKEN`); подпись старше
+   `INIT_DATA_MAX_AGE_SEC` (по умолчанию 24 ч) отклоняется;
 2. читает текущее состояние игрока из Firestore внутри транзакции
    (`db.runTransaction`);
 3. пересчитывает цену/доход по собственным формулам (клиентским цифрам не
@@ -103,11 +104,11 @@ index.html (клиент)                    game.js (Vercel, Express)          
 
 | Эндпоинт | Назначение |
 |---|---|
-| `/api/load` | Загрузка прогресса; создаёт нового игрока, если документа нет; считает оффлайн-доход |
+| `/api/load` | Загрузка прогресса; создаёт нового игрока, если документа нет; считает оффлайн-доход (1 ч < время оффлайн ≤ `progress.offlineLimit`, базово 3 ч) |
 | `/api/action/buy-item` | Покупка предмета/сотрудника — серверная цена, лимиты, слот в комнате |
 | `/api/action/buy-room` | Разблокировка комнаты |
 | `/api/action/apply-upgrades` | Массовое применение апгрейдов уровня предметов (батчем из `UpgradeBuffer`) |
-| `/api/action/sync-income` | Начисление накопленного пассивного дохода (батчем из `ClickBuffer`, раз в 30 сек) |
+| `/api/action/sync-income` | Начисление накопленного дохода (батчем из `ClickBuffer`, раз в 30 сек). Сервер начисляет не больше, чем игрок мог заработать с прошлой синхронизации (`progress.lastIncomeSync`, окно до 5 мин) |
 | `/api/action/complete-quest` | Завершение квеста, выдача награды, активация следующего, реферальная награда за `intro` |
 | `/api/action/buy-skin` | Покупка скина за TST |
 | `/api/action/equip-skin` | Смена уже купленного скина (проверяет владение) |
@@ -117,9 +118,8 @@ index.html (клиент)                    game.js (Vercel, Express)          
 | `/api/action/claim-instagram` | Награда за переход в Instagram, 50 TST |
 | `/api/action/upgrade-offline` | Покупка увеличения лимита оффлайн-дохода за TST |
 | `/api/action/save-wallet` | Привязка/отвязка TON-кошелька (адрес приходит от `tonConnectUI.onStatusChange`) |
-| `/api/handle-start` | Регистрация реферала при переходе по `ref_<id>` |
+| `/api/handle-start` | Регистрация реферала при переходе по `ref_<id>`. Из Mini App — по подписанному `initData` (`start_param`), от бота — с заголовком `x-internal-secret`. Только для новых игроков |
 | `/api/game/reset` | Полное удаление документа игрока |
-| `/api/game/sync` | ⚠️ Устарел, клиент больше не вызывает — см. "Технический долг" |
 | `/api/health` | Health-check |
 | `/api/checkOfflineIncome` | Отдельный файл (`checkOfflineIncome.js`), дёргается Vercel Cron раз в день, шлёт Telegram-пуш игрокам с накопленным оффлайн-доходом |
 
@@ -202,9 +202,6 @@ index.html (клиент)                    game.js (Vercel, Express)          
 - **`INSTRUCTIONS_SAVE_SYSTEM.md`** — нереализованный черновик архитектуры
   сохранений (сессии, `cash_last_verified` и т.д.), не соответствует коду.
   Подлежит удалению.
-- **`/api/game/sync`** — эндпоинт из более ранней итерации, клиент его
-  больше не вызывает (заменён точечными `/api/action/*` + `save-meta`).
-  Оставлен в коде как deprecated, а не удалён — не мешает, но и не нужен.
 - **`isServerDown` не авторитетен на сервере.** Краш "сервера" в игре —
   чисто клиентская случайность (`gameLoop`), на бэкенд никогда не
   репортится. `ClickBuffer.tick()` останавливает накопление дохода при
@@ -224,6 +221,8 @@ index.html (клиент)                    game.js (Vercel, Express)          
 |---|---|
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Admin SDK в `game.js` / `checkOfflineIncome.js` |
 | `TELEGRAM_BOT_TOKEN` | Проверка `initData`, отправка сообщений через Bot API |
+| `TELEGRAM_WEBHOOK_SECRET` | Проверка вебхука в `bot.js` и внутренних вызовов `bot.js` → `/api/handle-start` |
+| `INIT_DATA_MAX_AGE_SEC` | Необязательно. Максимальный возраст подписи `initData`, по умолчанию 86400 (24 ч) |
 | `CRON_SECRET` | Проверяется в `checkOfflineIncome.js` (`Authorization: Bearer ...`) — задаётся вручную, Vercel не генерирует значение сам |
 
 ---

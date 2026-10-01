@@ -43,6 +43,9 @@ app.post('/bot/webhook', async (req, res) => {
         await axios.post(`${GAME_API_URL}/handle-start`, {
           userId: chatId,
           referrerId: referrerId
+        }, {
+          // Подтверждаем, что запрос пришёл от нашего бота, а не от постороннего
+          headers: { 'x-internal-secret': process.env.TELEGRAM_WEBHOOK_SECRET }
         }).catch(e => console.error("Ref error:", e.message));
       }
 

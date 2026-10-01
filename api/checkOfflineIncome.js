@@ -50,10 +50,9 @@ module.exports = async (req, res) => {
                 // --- НОВАЯ ЛОГИКА: РАССЧЕТ ОФФЛАЙН-ДОХОДА ---
                 const lastSavedTime = player.progress.lastSaved;
                 const diffInSeconds = Math.floor((now - lastSavedTime) / 1000);
-                const FOUR_HOURS = 14400; // 4 часа в секундах
-                
-                // Рассчитываем доход, но не более чем за 4 часа
-                const secondsToCalculate = Math.min(diffInSeconds, FOUR_HOURS);
+                // Тот же лимит, что и в /api/load: базовые 3 часа или купленное улучшение
+                const offlineLimit = player.progress.offlineLimit || 10800;
+                const secondsToCalculate = Math.min(diffInSeconds, offlineLimit);
                 const offlineIncome = Math.floor(secondsToCalculate * player.progress.autoClicker);
 
                 // Отправляем уведомление, только если есть что забирать
